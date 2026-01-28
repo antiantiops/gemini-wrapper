@@ -90,13 +90,38 @@ func (s *GeminiService) startGeminiSession() {
 	// Start output reader
 	go s.readOutput()
 
-	// Wait for authentication to complete
-	fmt.Println("Waiting for Gemini CLI to authenticate...")
-	time.Sleep(5 * time.Second) // Give it time to pass "Waiting for auth..." phase
+	// Wait for the prompt to appear (indicates ready to receive input)
+	fmt.Println("Waiting for Gemini CLI to authenticate and show prompt...")
+
+	promptReady := false
+	timeout := time.After(30 * time.Second)
+
+	for !promptReady {
+		select {
+		case line := <-s.outputCh:
+			// Look for the prompt indicator
+			if strings.Contains(line, "Type your message") {
+				promptReady = true
+				fmt.Println("Prompt detected! Gemini CLI is ready.")
+			}
+		case <-timeout:
+			fmt.Println("WARNING: Timeout waiting for prompt, assuming ready anyway")
+			promptReady = true
+		}
+	}
+
+	// Give it a moment and clear any remaining output
+	time.Sleep(1 * time.Second)
+	cleared := 0
+	for len(s.outputCh) > 0 {
+		<-s.outputCh
+		cleared++
+	}
+	fmt.Printf("Cleared %d remaining messages\n", cleared)
 
 	s.ready = true
 	s.readyCh <- true
-	fmt.Println("Gemini CLI session ready!")
+	fmt.Println("Gemini CLI session ready to accept questions!")
 
 	// Process incoming questions
 	s.processQuestions()
@@ -130,22 +155,61 @@ func (s *GeminiService) readOutput() {
 func shouldSkipLine(line string) bool {
 	trimmed := strings.TrimSpace(line)
 
-	return strings.Contains(line, "░░░") ||
+	// Skip empty lines
+	if trimmed == "" {
+		return true
+	}
+
+	// Skip ASCII art and decorations
+	if strings.Contains(line, "░░░") ||
+		strings.Contains(line, "███") ||
+		strings.Contains(line, "█████") ||
 		strings.Contains(line, "╭──") ||
 		strings.Contains(line, "│") ||
-		strings.Contains(line, "╰──") ||
+		strings.Contains(line, "╰──") {
+		return true
+	}
+
+	// Skip startup messages and tips
+	if strings.Contains(line, "GEMINI") ||
 		strings.Contains(line, "with Gemini") ||
 		strings.Contains(line, "Tips for getting started") ||
+		strings.Contains(line, "Ask questions, edit files, or run commands") ||
+		strings.Contains(line, "Be specific for the best results") ||
+		strings.Contains(line, "Create GEMINI.md files") ||
+		strings.Contains(line, "customize your interactions") ||
+		strings.Contains(line, "/help for more information") ||
 		strings.Contains(line, "directory.") ||
 		strings.Contains(line, "Gemini 3 Flash and Pro") ||
 		strings.Contains(line, "Enable \"Preview features\"") ||
 		strings.Contains(line, "Learn more at") ||
-		strings.Contains(line, "no sandbox") ||
+		strings.Contains(line, "Warning you are running") ||
+		strings.Contains(line, "This warning can be disabled") {
+		return true
+	}
+
+	// Skip status line and prompt indicators
+	if strings.Contains(line, "no sandbox") ||
 		strings.Contains(line, "Auto (Gemini") ||
+		strings.Contains(line, "Type your message") ||
 		strings.Contains(line, "/model") ||
 		strings.HasPrefix(trimmed, "~") ||
-		strings.HasPrefix(trimmed, ">") ||
-		trimmed == ""
+		strings.HasPrefix(trimmed, ">") {
+		return true
+	}
+
+	// Skip numbered list items (1. 2. 3. 4.)
+	if len(trimmed) > 0 && trimmed[0] >= '1' && trimmed[0] <= '9' && len(trimmed) > 1 && trimmed[1] == '.' {
+		return true
+	}
+
+	return false
+}
+
+// isPromptLine detects if this line indicates the prompt is ready
+func isPromptLine(line string) bool {
+	return strings.Contains(line, "Type your message") ||
+		(strings.TrimSpace(line) != "" && strings.HasPrefix(strings.TrimSpace(line), "~"))
 }
 
 // processQuestions handles incoming question requests
@@ -191,22 +255,26 @@ func (s *GeminiService) askQuestion(question string, model string) (string, erro
 		return "", fmt.Errorf("failed to write question: %v", err)
 	}
 
-	// Collect response
+	// Collect response until we see the prompt again
 	var answer strings.Builder
 	collecting := false
 	lineCount := 0
-	noOutputCount := 0
 
 	timeout := time.After(90 * time.Second)
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
 
 	for {
 		select {
 		case line := <-s.outputCh:
-			noOutputCount = 0
+			// Check if we're back at the prompt (end of response)
+			if isPromptLine(line) {
+				if collecting {
+					fmt.Println("Prompt detected, response complete")
+					goto done
+				}
+				continue
+			}
 
-			// Skip UI elements
+			// Skip UI elements and banners
 			if shouldSkipLine(line) {
 				continue
 			}
@@ -221,28 +289,16 @@ func (s *GeminiService) askQuestion(question string, model string) (string, erro
 				return "", fmt.Errorf("authentication required during question processing")
 			}
 
-			// Start collecting after we see actual content
-			if !collecting && strings.TrimSpace(line) != "" {
-				collecting = true
-			}
-
-			if collecting {
+			// Start collecting any non-skipped content
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" {
+				if !collecting {
+					collecting = true
+					fmt.Printf("Started collecting response\n")
+				}
 				answer.WriteString(line)
 				answer.WriteString("\n")
 				lineCount++
-			}
-
-			// Stop after we get a reasonable amount of output
-			// and see an empty line (end of response)
-			if collecting && lineCount > 3 && strings.TrimSpace(line) == "" {
-				break
-			}
-
-		case <-ticker.C:
-			noOutputCount++
-			// If we've collected something and no output for 2 seconds, we're done
-			if collecting && noOutputCount > 20 {
-				break
 			}
 
 		case <-timeout:
@@ -251,12 +307,9 @@ func (s *GeminiService) askQuestion(question string, model string) (string, erro
 			}
 			return "", fmt.Errorf("timeout waiting for gemini response")
 		}
-
-		// Break if we have enough output and haven't seen new output in a while
-		if collecting && lineCount > 5 && noOutputCount > 10 {
-			break
-		}
 	}
+
+done:
 
 	result := strings.TrimSpace(answer.String())
 	if result == "" {
