@@ -21,12 +21,14 @@ func main() {
 	geminiService := NewGeminiService()
 
 	// Routes
-	e.GET("/", func(c echo.Context) error {
+	healthHandler := func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{
 			"message": "Gemini Wrapper API",
 			"status":  "running",
 		})
-	})
+	}
+	e.GET("/", healthHandler)
+	e.HEAD("/", healthHandler) // Support HEAD for health checks
 
 	e.POST("/api/ask", func(c echo.Context) error {
 		return handleAsk(c, geminiService)

@@ -2,21 +2,21 @@ version: '3.8'
 
 services:
   gemini-wrapper:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # Use pre-built image from Docker Hub
+    image: antiantiops/gemini-wrapper:latest
     container_name: gemini-wrapper
     ports:
       - "8080:8080"
-    environment:
-      - PORT=8080
     volumes:
-      # Mount .gemini credentials folder from host to container
+      # Mount .gemini credentials folder from host to container (read-write for token renewal)
       # Make sure to run 'gemini' on host first to authenticate
-      - ${HOME}/.gemini:/app/.gemini:ro
+      # Linux/Mac: uses ${HOME}
+      - ${HOME}/.gemini:/app/.gemini
+      # Windows: use ${USERPROFILE} instead
+      # - ${USERPROFILE}/.gemini:/app/.gemini
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--method=GET", "http://localhost:8080/"]
       interval: 30s
       timeout: 10s
       retries: 3

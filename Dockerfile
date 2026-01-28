@@ -27,6 +27,7 @@ RUN apk add --no-cache \
     bash \
     curl \
     wget \
+    su-exec \
     python3 \
     make \
     g++ \
@@ -46,13 +47,17 @@ WORKDIR /app
 # Copy the binary from builder
 COPY --from=builder /app/gemini-wrapper .
 
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Create .gemini directory and set permissions
 # Use the existing 'node' user from node:20-alpine (UID 1000, GID 1000)
 RUN mkdir -p /app/.gemini && \
     chown -R node:node /app
 
-# Switch to non-root user
-USER node
+# Note: We start as root to fix permissions in entrypoint, then switch to node user
+# This allows auto-fixing mounted volume permissions
 
 # Expose port
 EXPOSE 8080
@@ -64,7 +69,7 @@ ENV GEMINI_CONFIG_DIR=/app/.gemini
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/ || exit 1
+  CMD wget --no-verbose --tries=1 --spider --method=GET http://localhost:8080/ || exit 1
 
-# Run the application
-CMD ["./gemini-wrapper"]
+# Use entrypoint to fix permissions and run as node user
+ENTRYPOINT ["/entrypoint.sh"]
