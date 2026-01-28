@@ -39,6 +39,14 @@ func (s *GeminiService) Ask(question string, model string) (string, error) {
 
 	cmd := exec.Command("gemini", args...)
 
+	// Set environment variables to tell gemini CLI where to find credentials
+	cmd.Env = append(os.Environ(),
+		"HOME=/app",
+		"GEMINI_CONFIG_DIR=/app/.gemini",
+		"XDG_CONFIG_HOME=/app",
+		"USER=root",
+	)
+
 	// Create a pseudo-terminal to handle interactive TUI
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -191,10 +199,8 @@ func (s *GeminiService) Ask(question string, model string) (string, error) {
 
 // AskWithEnv sends a question with custom environment variables
 func (s *GeminiService) AskWithEnv(question string, model string, envVars map[string]string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Set environment variables
+	// Note: Don't lock here, Ask() will lock
+	// Set environment variables temporarily
 	for key, value := range envVars {
 		os.Setenv(key, value)
 	}
