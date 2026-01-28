@@ -21,13 +21,24 @@ RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o gemini-wrapper .
 # Runtime stage
 FROM node:20-alpine
 
-# Install runtime dependencies
-RUN apk add --no-cache ca-certificates bash curl wget
+# Install build dependencies for native modules and runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    bash \
+    curl \
+    wget \
+    python3 \
+    make \
+    g++ \
+    && ln -sf python3 /usr/bin/python
 
-# Install Gemini CLI (correct package name, requires Node.js 20+)
+# Install Gemini CLI (has native dependencies that need compilation)
 RUN npm install -g @google/gemini-cli && \
     gemini --version && \
     echo "✓ Gemini CLI installed successfully"
+
+# Clean up build dependencies to reduce image size
+RUN apk del python3 make g++
 
 # Set up working directory
 WORKDIR /app
