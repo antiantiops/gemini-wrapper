@@ -258,13 +258,26 @@ func (s *GeminiService) askQuestion(question string, model string) (string, erro
 
 	// Send the question
 	fmt.Printf("Sending question: %q\n", question)
-	n, err := io.WriteString(s.ptmx, question+"\n")
+
+	// Write the question text
+	n, err := io.WriteString(s.ptmx, question)
 	if err != nil {
 		return "", fmt.Errorf("failed to write question: %v", err)
 	}
-	fmt.Printf("Wrote %d bytes to PTY\n", n)
+	fmt.Printf("Wrote question: %d bytes\n", n)
 
-	// Give it a moment to process the input
+	// Give it a tiny moment for the text to be rendered
+	time.Sleep(100 * time.Millisecond)
+
+	// Send Enter key (carriage return for TTY)
+	// Try both \r and \n to be sure
+	_, err = s.ptmx.Write([]byte{13, 10}) // CR+LF (\r\n)
+	if err != nil {
+		return "", fmt.Errorf("failed to send enter key: %v", err)
+	}
+	fmt.Println("Sent Enter key (CR+LF)")
+
+	// Give it a moment to process the submission
 	time.Sleep(500 * time.Millisecond)
 
 	// Collect response until we see the prompt again
