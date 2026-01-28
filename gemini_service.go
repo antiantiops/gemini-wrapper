@@ -230,8 +230,13 @@ func (s *GeminiService) askQuestion(question string, model string) (string, erro
 	}
 
 	// Clear any pending output from previous question
+	cleared := 0
 	for len(s.outputCh) > 0 {
 		<-s.outputCh
+		cleared++
+	}
+	if cleared > 0 {
+		fmt.Printf("Cleared %d pending messages\n", cleared)
 	}
 
 	// Change model if needed
@@ -240,7 +245,7 @@ func (s *GeminiService) askQuestion(question string, model string) (string, erro
 		if err != nil {
 			return "", fmt.Errorf("failed to set model: %v", err)
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(1 * time.Second)
 
 		// Clear model change output
 		for len(s.outputCh) > 0 {
@@ -248,26 +253,42 @@ func (s *GeminiService) askQuestion(question string, model string) (string, erro
 		}
 	}
 
+	// Give the TUI a moment to be fully ready
+	time.Sleep(200 * time.Millisecond)
+
 	// Send the question
-	fmt.Printf("Sending question: %s\n", question)
-	_, err := io.WriteString(s.ptmx, question+"\n")
+	fmt.Printf("Sending question: %q\n", question)
+	n, err := io.WriteString(s.ptmx, question+"\n")
 	if err != nil {
 		return "", fmt.Errorf("failed to write question: %v", err)
 	}
+	fmt.Printf("Wrote %d bytes to PTY\n", n)
+
+	// Give it a moment to process the input
+	time.Sleep(500 * time.Millisecond)
 
 	// Collect response until we see the prompt again
 	var answer strings.Builder
 	collecting := false
 	lineCount := 0
+	seenAnyOutput := false
+	noOutputTicks := 0
 
 	timeout := time.After(90 * time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case line := <-s.outputCh:
+			seenAnyOutput = true
+			noOutputTicks = 0
+
+			fmt.Printf("RAW OUTPUT: %q\n", line) // Debug: show all output
+
 			// Check if we're back at the prompt (end of response)
 			if isPromptLine(line) {
-				if collecting {
+				if collecting && lineCount > 0 {
 					fmt.Println("Prompt detected, response complete")
 					goto done
 				}
@@ -281,6 +302,7 @@ func (s *GeminiService) askQuestion(question string, model string) (string, erro
 
 			// Skip the echo of our question
 			if strings.Contains(line, question) {
+				fmt.Println("Skipping question echo")
 				continue
 			}
 
@@ -294,16 +316,31 @@ func (s *GeminiService) askQuestion(question string, model string) (string, erro
 			if trimmed != "" {
 				if !collecting {
 					collecting = true
-					fmt.Printf("Started collecting response\n")
+					fmt.Printf("Started collecting response with: %q\n", line)
 				}
 				answer.WriteString(line)
 				answer.WriteString("\n")
 				lineCount++
 			}
 
+		case <-ticker.C:
+			noOutputTicks++
+			// If we've seen output but nothing for 5 seconds (25 ticks), assume done
+			if seenAnyOutput && noOutputTicks > 25 {
+				fmt.Printf("No output for 5 seconds, assuming complete (collected %d lines)\n", lineCount)
+				if lineCount > 0 {
+					goto done
+				}
+				return "", fmt.Errorf("no response received after 5 seconds of silence")
+			}
+
 		case <-timeout:
+			fmt.Printf("Timeout reached. Collected %d lines. SeenAnyOutput: %v\n", lineCount, seenAnyOutput)
 			if answer.Len() > 0 {
 				return strings.TrimSpace(answer.String()), nil
+			}
+			if !seenAnyOutput {
+				return "", fmt.Errorf("timeout: no output received from gemini CLI - input may not have been processed")
 			}
 			return "", fmt.Errorf("timeout waiting for gemini response")
 		}
