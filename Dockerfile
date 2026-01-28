@@ -35,15 +35,13 @@ WORKDIR /app
 # Copy the binary from builder
 COPY --from=builder /app/gemini-wrapper .
 
-# Create a non-root user
-RUN addgroup -g 1000 appuser && \
-    adduser -D -u 1000 -G appuser appuser && \
-    chown -R appuser:appuser /app && \
-    mkdir -p /app/.gemini && \
-    chown -R appuser:appuser /app/.gemini
+# Create .gemini directory and set permissions
+# Use the existing 'node' user from node:20-alpine (UID 1000, GID 1000)
+RUN mkdir -p /app/.gemini && \
+    chown -R node:node /app
 
 # Switch to non-root user
-USER appuser
+USER node
 
 # Expose port
 EXPOSE 8080
