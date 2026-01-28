@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -19,27 +18,57 @@ import (
 var ansiEscapeRegex = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\]11;?\x1b\\|\x1b[=>].*?[a-zA-Z]|\x1b\[[\d;]*[mGKHfJhlr]`)
 
 type GeminiService struct {
-	mu sync.Mutex
+	mu         sync.Mutex
+	ptmx       *os.File
+	cmd        *exec.Cmd
+	ready      bool
+	readyCh    chan bool
+	questionCh chan questionRequest
+	outputCh   chan string // Channel for output lines from PTY
+}
+
+type questionRequest struct {
+	question   string
+	model      string
+	responseCh chan questionResponse
+}
+
+type questionResponse struct {
+	answer string
+	err    error
 }
 
 func NewGeminiService() *GeminiService {
-	return &GeminiService{}
-}
-
-// Ask sends a question to Gemini CLI and returns the response
-func (s *GeminiService) Ask(question string, model string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Prepare the command
-	args := []string{}
-	if model != "" {
-		args = append(args, "/model", model)
+	s := &GeminiService{
+		readyCh:    make(chan bool, 1),
+		questionCh: make(chan questionRequest, 10),
+		outputCh:   make(chan string, 100),
 	}
 
-	cmd := exec.Command("gemini", args...)
+	// Start the persistent gemini CLI session
+	go s.startGeminiSession()
 
-	// Set environment variables to tell gemini CLI where to find credentials
+	// Wait for it to be ready (with timeout)
+	select {
+	case ready := <-s.readyCh:
+		if !ready {
+			fmt.Println("WARNING: Gemini CLI failed to start")
+		}
+	case <-time.After(30 * time.Second):
+		fmt.Println("WARNING: Gemini CLI startup timeout")
+	}
+
+	return s
+}
+
+// startGeminiSession starts a persistent gemini CLI session
+func (s *GeminiService) startGeminiSession() {
+	fmt.Println("Starting persistent Gemini CLI session...")
+
+	// Prepare the command
+	cmd := exec.Command("gemini")
+
+	// Set environment variables
 	cmd.Env = append(os.Environ(),
 		"HOME=/app",
 		"GEMINI_CONFIG_DIR=/app/.gemini",
@@ -47,160 +76,220 @@ func (s *GeminiService) Ask(question string, model string) (string, error) {
 		"USER=root",
 	)
 
-	// Create a pseudo-terminal to handle interactive TUI
+	// Create a pseudo-terminal
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
-		return "", fmt.Errorf("failed to start gemini: %v", err)
+		fmt.Printf("ERROR: Failed to start gemini: %v\n", err)
+		s.readyCh <- false
+		return
 	}
-	defer ptmx.Close()
 
-	// Buffer to collect output
-	var outputBuffer bytes.Buffer
-	var allOutput bytes.Buffer
+	s.ptmx = ptmx
+	s.cmd = cmd
 
-	// Channel to signal completion
-	done := make(chan error)
-	answerStarted := false
-	collectingAnswer := false
-	lineCount := 0
+	// Start output reader
+	go s.readOutput()
 
-	// Read output in a goroutine
-	go func() {
-		scanner := bufio.NewScanner(ptmx)
-		buf := make([]byte, 0, 64*1024)
-		scanner.Buffer(buf, 1024*1024) // Increase buffer size for large responses
+	// Wait for authentication to complete
+	fmt.Println("Waiting for Gemini CLI to authenticate...")
+	time.Sleep(5 * time.Second) // Give it time to pass "Waiting for auth..." phase
 
-		for scanner.Scan() {
-			line := scanner.Text()
-			allOutput.WriteString(line + "\n")
+	s.ready = true
+	s.readyCh <- true
+	fmt.Println("Gemini CLI session ready!")
 
-			// Strip ANSI escape codes
-			cleanLine := stripANSI(line)
-			lineCount++
+	// Process incoming questions
+	s.processQuestions()
+}
 
-			// Debug logging (can be removed later)
-			if strings.Contains(cleanLine, "auth") || strings.Contains(cleanLine, "Waiting") {
-				fmt.Printf("DEBUG: Auth-related line: %q\n", cleanLine)
-			}
+// readOutput continuously reads from PTY and sends to output channel
+func (s *GeminiService) readOutput() {
+	scanner := bufio.NewScanner(s.ptmx)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
 
-			// Check for authentication issues
-			if strings.Contains(cleanLine, "Waiting for auth") {
-				fmt.Printf("DEBUG: Full output before auth error:\n%s\n", allOutput.String())
-				done <- fmt.Errorf("authentication required: gemini CLI is not authenticated in container. Make sure ~/.gemini is mounted correctly")
-				return
-			}
+	for scanner.Scan() {
+		line := scanner.Text()
+		cleanLine := stripANSI(line)
 
-			// Skip the ASCII art, warnings, TUI boxes, and initial prompts
-			if strings.Contains(cleanLine, "░░░") || // ASCII art
-				strings.Contains(cleanLine, "╭──") || // Box top
-				strings.Contains(cleanLine, "│") || // Box sides
-				strings.Contains(cleanLine, "╰──") || // Box bottom
-				strings.Contains(cleanLine, "GEMINI") ||
-				strings.Contains(cleanLine, "with Gemini") ||
-				strings.Contains(cleanLine, "Tips for getting started") ||
-				strings.Contains(cleanLine, "Ask questions") ||
-				strings.Contains(cleanLine, "Be specific") ||
-				strings.Contains(cleanLine, "Create GEMINI.md") ||
-				strings.Contains(cleanLine, "/help for more information") ||
-				strings.Contains(cleanLine, "Warning you are running") ||
-				strings.Contains(cleanLine, "This warning can be disabled") ||
-				strings.Contains(cleanLine, "directory.") ||
-				strings.Contains(cleanLine, "Gemini 3 Flash and Pro") ||
-				strings.Contains(cleanLine, "Enable \"Preview features\"") ||
-				strings.Contains(cleanLine, "Learn more at") ||
-				strings.Contains(cleanLine, "no sandbox") ||
-				strings.Contains(cleanLine, "Auto (Gemini") ||
-				strings.Contains(cleanLine, "/model") ||
-				strings.HasPrefix(strings.TrimSpace(cleanLine), "~") ||
-				strings.HasPrefix(strings.TrimSpace(cleanLine), ">") ||
-				strings.Contains(cleanLine, "Type your message or @path/to/file") {
-				continue
-			}
+		// Send all lines to output channel for processing
+		s.outputCh <- cleanLine
 
-			// Skip empty lines
-			if strings.TrimSpace(cleanLine) == "" {
-				continue
-			}
-
-			// Detect when answer starts (non-empty line after prompt)
-			if !answerStarted {
-				answerStarted = true
-				collectingAnswer = true
-			}
-
-			// Collect the answer
-			if collectingAnswer {
-				outputBuffer.WriteString(cleanLine)
-				outputBuffer.WriteString("\n")
-			}
-
-			// Stop collecting when we see indicators that response is complete
-			// Usually after getting substantial output (more than 100 lines) or seeing the next prompt
-			if answerStarted && lineCount > 100 && (strings.Contains(cleanLine, ">") || strings.Contains(cleanLine, "~")) {
-				break
-			}
+		// Debug output
+		if cleanLine != "" && !shouldSkipLine(cleanLine) {
+			fmt.Printf("GEMINI: %s\n", cleanLine)
 		}
+	}
 
-		if err := scanner.Err(); err != nil {
-			done <- fmt.Errorf("scanner error: %v", err)
-			return
+	if err := scanner.Err(); err != nil {
+		fmt.Printf("ERROR reading from gemini: %v\n", err)
+	}
+}
+
+// shouldSkipLine determines if a line should be filtered out
+func shouldSkipLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+
+	return strings.Contains(line, "░░░") ||
+		strings.Contains(line, "╭──") ||
+		strings.Contains(line, "│") ||
+		strings.Contains(line, "╰──") ||
+		strings.Contains(line, "with Gemini") ||
+		strings.Contains(line, "Tips for getting started") ||
+		strings.Contains(line, "directory.") ||
+		strings.Contains(line, "Gemini 3 Flash and Pro") ||
+		strings.Contains(line, "Enable \"Preview features\"") ||
+		strings.Contains(line, "Learn more at") ||
+		strings.Contains(line, "no sandbox") ||
+		strings.Contains(line, "Auto (Gemini") ||
+		strings.Contains(line, "/model") ||
+		strings.HasPrefix(trimmed, "~") ||
+		strings.HasPrefix(trimmed, ">") ||
+		trimmed == ""
+}
+
+// processQuestions handles incoming question requests
+func (s *GeminiService) processQuestions() {
+	for req := range s.questionCh {
+		answer, err := s.askQuestion(req.question, req.model)
+		req.responseCh <- questionResponse{
+			answer: answer,
+			err:    err,
 		}
+	}
+}
 
-		done <- nil
-	}()
+// askQuestion sends a question to the persistent session
+func (s *GeminiService) askQuestion(question string, model string) (string, error) {
+	if !s.ready {
+		return "", fmt.Errorf("gemini session not ready")
+	}
 
-	// Wait for the prompt to appear (give it a moment to initialize)
-	time.Sleep(3 * time.Second)
+	// Clear any pending output from previous question
+	for len(s.outputCh) > 0 {
+		<-s.outputCh
+	}
+
+	// Change model if needed
+	if model != "" {
+		_, err := io.WriteString(s.ptmx, "/model "+model+"\n")
+		if err != nil {
+			return "", fmt.Errorf("failed to set model: %v", err)
+		}
+		time.Sleep(500 * time.Millisecond)
+
+		// Clear model change output
+		for len(s.outputCh) > 0 {
+			<-s.outputCh
+		}
+	}
 
 	// Send the question
-	_, err = io.WriteString(ptmx, question+"\n")
+	fmt.Printf("Sending question: %s\n", question)
+	_, err := io.WriteString(s.ptmx, question+"\n")
 	if err != nil {
 		return "", fmt.Errorf("failed to write question: %v", err)
 	}
 
-	// Wait for response with timeout
-	select {
-	case err := <-done:
-		if err != nil {
-			return "", err
+	// Collect response
+	var answer strings.Builder
+	collecting := false
+	lineCount := 0
+	noOutputCount := 0
+
+	timeout := time.After(90 * time.Second)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case line := <-s.outputCh:
+			noOutputCount = 0
+
+			// Skip UI elements
+			if shouldSkipLine(line) {
+				continue
+			}
+
+			// Skip the echo of our question
+			if strings.Contains(line, question) {
+				continue
+			}
+
+			// Check for authentication issues
+			if strings.Contains(line, "Waiting for auth") {
+				return "", fmt.Errorf("authentication required during question processing")
+			}
+
+			// Start collecting after we see actual content
+			if !collecting && strings.TrimSpace(line) != "" {
+				collecting = true
+			}
+
+			if collecting {
+				answer.WriteString(line)
+				answer.WriteString("\n")
+				lineCount++
+			}
+
+			// Stop after we get a reasonable amount of output
+			// and see an empty line (end of response)
+			if collecting && lineCount > 3 && strings.TrimSpace(line) == "" {
+				break
+			}
+
+		case <-ticker.C:
+			noOutputCount++
+			// If we've collected something and no output for 2 seconds, we're done
+			if collecting && noOutputCount > 20 {
+				break
+			}
+
+		case <-timeout:
+			if answer.Len() > 0 {
+				return strings.TrimSpace(answer.String()), nil
+			}
+			return "", fmt.Errorf("timeout waiting for gemini response")
 		}
-	case <-time.After(90 * time.Second):
-		// Try to capture what we have so far
-		if outputBuffer.Len() > 0 {
-			return strings.TrimSpace(outputBuffer.String()), nil
+
+		// Break if we have enough output and haven't seen new output in a while
+		if collecting && lineCount > 5 && noOutputCount > 10 {
+			break
 		}
-		return "", fmt.Errorf("timeout waiting for gemini response")
 	}
 
-	// Send Ctrl+C to exit gracefully
-	ptmx.Write([]byte{3})
-	time.Sleep(500 * time.Millisecond)
-
-	// Wait for process to finish (with timeout)
-	cmdDone := make(chan error, 1)
-	go func() {
-		cmdDone <- cmd.Wait()
-	}()
-
-	select {
-	case <-cmdDone:
-		// Process finished
-	case <-time.After(2 * time.Second):
-		// Force kill if it doesn't exit
-		cmd.Process.Kill()
-	}
-
-	answer := strings.TrimSpace(outputBuffer.String())
-	if answer == "" {
-		// Try to extract something useful from all output
-		allText := allOutput.String()
-		if allText != "" {
-			return "", fmt.Errorf("no clear response from gemini. Raw output:\n%s", allText)
-		}
+	result := strings.TrimSpace(answer.String())
+	if result == "" {
 		return "", fmt.Errorf("no response from gemini")
 	}
 
-	return answer, nil
+	fmt.Printf("Collected response (%d lines)\n", lineCount)
+	return result, nil
+}
+
+// Ask sends a question to Gemini CLI and returns the response
+func (s *GeminiService) Ask(question string, model string) (string, error) {
+	if !s.ready {
+		return "", fmt.Errorf("gemini session not ready")
+	}
+
+	// Create response channel
+	respCh := make(chan questionResponse, 1)
+
+	// Send question request
+	s.questionCh <- questionRequest{
+		question:   question,
+		model:      model,
+		responseCh: respCh,
+	}
+
+	// Wait for response with timeout
+	select {
+	case resp := <-respCh:
+		return resp.answer, resp.err
+	case <-time.After(90 * time.Second):
+		return "", fmt.Errorf("timeout waiting for response")
+	}
 }
 
 // AskWithEnv sends a question with custom environment variables
