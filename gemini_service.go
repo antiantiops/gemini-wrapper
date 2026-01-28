@@ -7,12 +7,16 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/creack/pty"
 )
+
+// Regular expression to match ANSI escape codes
+var ansiEscapeRegex = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\]11;?\x1b\\|\x1b[=>].*?[a-zA-Z]|\x1b\[[\d;]*[mGKHfJhlr]`)
 
 type GeminiService struct {
 	mu sync.Mutex
@@ -61,38 +65,64 @@ func (s *GeminiService) Ask(question string, model string) (string, error) {
 		for scanner.Scan() {
 			line := scanner.Text()
 			allOutput.WriteString(line + "\n")
+
+			// Strip ANSI escape codes
+			cleanLine := stripANSI(line)
 			lineCount++
 
-			// Skip the ASCII art, warnings, and initial prompts
-			if strings.Contains(line, "GEMINI") ||
-				strings.Contains(line, "█") || // ASCII art detection
-				strings.Contains(line, "Tips for getting started") ||
-				strings.Contains(line, "Ask questions") ||
-				strings.Contains(line, "Be specific") ||
-				strings.Contains(line, "Create GEMINI.md") ||
-				strings.Contains(line, "/help for more information") ||
-				strings.Contains(line, "Warning you are running") ||
-				strings.Contains(line, "This warning can be disabled") ||
-				strings.HasPrefix(strings.TrimSpace(line), ">") ||
-				strings.Contains(line, "Type your message or @path/to/file") {
+			// Check for authentication issues
+			if strings.Contains(cleanLine, "Waiting for auth") {
+				done <- fmt.Errorf("authentication required: gemini CLI is not authenticated in container. Make sure ~/.gemini is mounted correctly")
+				return
+			}
+
+			// Skip the ASCII art, warnings, TUI boxes, and initial prompts
+			if strings.Contains(cleanLine, "░░░") || // ASCII art
+				strings.Contains(cleanLine, "╭──") || // Box top
+				strings.Contains(cleanLine, "│") || // Box sides
+				strings.Contains(cleanLine, "╰──") || // Box bottom
+				strings.Contains(cleanLine, "GEMINI") ||
+				strings.Contains(cleanLine, "with Gemini") ||
+				strings.Contains(cleanLine, "Tips for getting started") ||
+				strings.Contains(cleanLine, "Ask questions") ||
+				strings.Contains(cleanLine, "Be specific") ||
+				strings.Contains(cleanLine, "Create GEMINI.md") ||
+				strings.Contains(cleanLine, "/help for more information") ||
+				strings.Contains(cleanLine, "Warning you are running") ||
+				strings.Contains(cleanLine, "This warning can be disabled") ||
+				strings.Contains(cleanLine, "directory.") ||
+				strings.Contains(cleanLine, "Gemini 3 Flash and Pro") ||
+				strings.Contains(cleanLine, "Enable \"Preview features\"") ||
+				strings.Contains(cleanLine, "Learn more at") ||
+				strings.Contains(cleanLine, "no sandbox") ||
+				strings.Contains(cleanLine, "Auto (Gemini") ||
+				strings.Contains(cleanLine, "/model") ||
+				strings.HasPrefix(strings.TrimSpace(cleanLine), "~") ||
+				strings.HasPrefix(strings.TrimSpace(cleanLine), ">") ||
+				strings.Contains(cleanLine, "Type your message or @path/to/file") {
+				continue
+			}
+
+			// Skip empty lines
+			if strings.TrimSpace(cleanLine) == "" {
 				continue
 			}
 
 			// Detect when answer starts (non-empty line after prompt)
-			if !answerStarted && strings.TrimSpace(line) != "" {
+			if !answerStarted {
 				answerStarted = true
 				collectingAnswer = true
 			}
 
 			// Collect the answer
-			if collectingAnswer && strings.TrimSpace(line) != "" {
-				outputBuffer.WriteString(line)
+			if collectingAnswer {
+				outputBuffer.WriteString(cleanLine)
 				outputBuffer.WriteString("\n")
 			}
 
 			// Stop collecting when we see indicators that response is complete
-			// Usually after getting substantial output (more than 50 lines) or seeing the next prompt
-			if answerStarted && lineCount > 50 && strings.Contains(line, ">") {
+			// Usually after getting substantial output (more than 100 lines) or seeing the next prompt
+			if answerStarted && lineCount > 100 && (strings.Contains(cleanLine, ">") || strings.Contains(cleanLine, "~")) {
 				break
 			}
 		}
@@ -175,4 +205,9 @@ func (s *GeminiService) AskWithEnv(question string, model string, envVars map[st
 	}()
 
 	return s.Ask(question, model)
+}
+
+// stripANSI removes ANSI escape codes from a string
+func stripANSI(str string) string {
+	return ansiEscapeRegex.ReplaceAllString(str, "")
 }
