@@ -160,6 +160,22 @@ func shouldSkipLine(line string) bool {
 		return true
 	}
 
+	// Skip loading spinners and progress indicators
+	// These contain characters like: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
+	if strings.Contains(line, "⠋") || strings.Contains(line, "⠙") ||
+		strings.Contains(line, "⠹") || strings.Contains(line, "⠸") ||
+		strings.Contains(line, "⠼") || strings.Contains(line, "⠴") ||
+		strings.Contains(line, "⠦") || strings.Contains(line, "⠧") ||
+		strings.Contains(line, "⠇") || strings.Contains(line, "⠏") {
+		return true
+	}
+
+	// Skip bug report and cancel messages
+	if strings.Contains(line, "File a bug report") ||
+		strings.Contains(line, "esc to cancel") {
+		return true
+	}
+
 	// Skip ASCII art and decorations
 	if strings.Contains(line, "░░░") ||
 		strings.Contains(line, "███") ||
@@ -338,13 +354,15 @@ func (s *GeminiService) askQuestion(question string, model string) (string, erro
 
 		case <-ticker.C:
 			noOutputTicks++
-			// If we've seen output but nothing for 5 seconds (25 ticks), assume done
-			if seenAnyOutput && noOutputTicks > 25 {
-				fmt.Printf("No output for 5 seconds, assuming complete (collected %d lines)\n", lineCount)
-				if lineCount > 0 {
-					goto done
-				}
-				return "", fmt.Errorf("no response received after 5 seconds of silence")
+			// If we've COLLECTED answer lines and no output for 3 seconds (15 ticks), assume done
+			if collecting && lineCount > 0 && noOutputTicks > 15 {
+				fmt.Printf("Collected %d lines and no new output for 3 seconds, assuming complete\n", lineCount)
+				goto done
+			}
+			// If we've seen ANY output but nothing collected and waited 10 seconds (50 ticks)
+			if seenAnyOutput && !collecting && noOutputTicks > 50 {
+				fmt.Println("Seen output but no answer collected after 10 seconds")
+				return "", fmt.Errorf("gemini CLI showed activity but no answer was received")
 			}
 
 		case <-timeout:
