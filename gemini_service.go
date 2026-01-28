@@ -78,8 +78,14 @@ func (s *GeminiService) Ask(question string, model string) (string, error) {
 			cleanLine := stripANSI(line)
 			lineCount++
 
+			// Debug logging (can be removed later)
+			if strings.Contains(cleanLine, "auth") || strings.Contains(cleanLine, "Waiting") {
+				fmt.Printf("DEBUG: Auth-related line: %q\n", cleanLine)
+			}
+
 			// Check for authentication issues
 			if strings.Contains(cleanLine, "Waiting for auth") {
+				fmt.Printf("DEBUG: Full output before auth error:\n%s\n", allOutput.String())
 				done <- fmt.Errorf("authentication required: gemini CLI is not authenticated in container. Make sure ~/.gemini is mounted correctly")
 				return
 			}
