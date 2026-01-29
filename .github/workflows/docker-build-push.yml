@@ -46,14 +46,15 @@ jobs:
           tags: |
             # Set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
-            # Version tags for releases
+            # Version tags for releases (e.g., v0.1.0 -> 0.1.0, 0.1, 0)
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            # Branch name for non-master branches
+            # Branch name for branch pushes (e.g., master, develop)
             type=ref,event=branch
-            # SHA for commits
-            type=sha,prefix={{branch}}-
+            # SHA for branch commits only (e.g., master-5a554ab)
+            # Only enabled for branch events (not tags)
+            type=sha,prefix=sha-,event=branch
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -66,3 +67,12 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+      - name: Update Docker Hub description
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ env.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+          repository: ${{ env.IMAGE_NAME }}
+          readme-filepath: ./README.md
