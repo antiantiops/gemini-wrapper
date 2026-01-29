@@ -187,15 +187,15 @@ Content-Type: application/json
 - `model` (optional): Gemini model to use (see [Model Selection Guide](MODEL_SELECTION_GUIDE.md))
 
 **Available Models:**
-- **Auto-selection** - Don't specify model (recommended - Gemini chooses best)
-- `gemini-3-flash` - 🆕 Latest flash model (preview)
-- `gemini-3-pro` - 🆕 Latest pro model (preview)
+- **Auto-selection** - Don't specify model (**recommended** - Gemini chooses best)
+- `gemini-2.5-flash` - ⚡⭐ Balanced (general use, **recommended**)
 - `gemini-2.5-flash-lite` - ⚡ Fastest, cheapest (simple questions)
-- `gemini-2.5-flash` - ⚡⭐ Balanced (general use)
 - `gemini-2.5-pro` - ⭐⭐ Best quality (complex tasks)
 - `gemini-2.0-flash-exp` - 🧪 Experimental features
 
-See [MODEL_SELECTION_GUIDE.md](MODEL_SELECTION_GUIDE.md) for detailed comparison and recommendations.
+⚠️ **Note**: Gemini 3 models (`gemini-3-flash`, `gemini-3-pro`) may not be available yet. Use auto-selection or Gemini 2.5 models.
+
+See [MODEL_SELECTION_GUIDE.md](MODEL_SELECTION_GUIDE.md) and [TROUBLESHOOTING_MODELS.md](TROUBLESHOOTING_MODELS.md) for details.
 
 **Response (Success):**
 ```json

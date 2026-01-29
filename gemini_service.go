@@ -66,7 +66,18 @@ func (s *GeminiService) Ask(question string, model string) (string, error) {
 	// Run command and capture output
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("failed to execute gemini CLI: %v (output: %s)", err, string(output))
+		outputStr := string(output)
+
+		// Provide helpful error messages for common issues
+		if strings.Contains(outputStr, "ModelNotFoundError") || strings.Contains(outputStr, "not found") {
+			return "", fmt.Errorf("model not found: the model '%s' doesn't exist or isn't available. Use 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro', or omit model for auto-selection", model)
+		}
+
+		if strings.Contains(outputStr, "authentication") || strings.Contains(outputStr, "auth") {
+			return "", fmt.Errorf("authentication error: make sure ~/.gemini is mounted correctly and you're authenticated")
+		}
+
+		return "", fmt.Errorf("failed to execute gemini CLI: %v (output: %s)", err, outputStr)
 	}
 
 	// The output may contain debug messages before the JSON
@@ -94,7 +105,14 @@ func (s *GeminiService) Ask(question string, model string) (string, error) {
 
 	// Check for errors in response
 	if response.Error != nil {
-		return "", fmt.Errorf("gemini error: %s - %s", response.Error.Type, response.Error.Message)
+		errorMsg := fmt.Sprintf("gemini error: %s - %s", response.Error.Type, response.Error.Message)
+
+		// Provide helpful message for common errors
+		if strings.Contains(errorMsg, "ModelNotFoundError") || strings.Contains(errorMsg, "not found") {
+			return "", fmt.Errorf("model not found: the specified model doesn't exist or isn't available. Try using 'gemini-2.5-flash' or don't specify a model for auto-selection")
+		}
+
+		return "", fmt.Errorf(errorMsg)
 	}
 
 	// Return the response text
