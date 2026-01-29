@@ -3,14 +3,12 @@ name: Build and Push Docker Image
 on:
   push:
     branches:
-      - main
-      - master
+      - master  # Changed from main to master
     tags:
       - 'v*.*.*'
   pull_request:
     branches:
-      - main
-      - master
+      - master  # Changed from main to master
   workflow_dispatch:
 
 env:
@@ -52,7 +50,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            # Branch name for non-main branches
+            # Branch name for non-master branches
             type=ref,event=branch
             # SHA for commits
             type=sha,prefix={{branch}}-
@@ -70,7 +68,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
 
       - name: Update Docker Hub description
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
         uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ env.DOCKER_HUB_USERNAME }}
