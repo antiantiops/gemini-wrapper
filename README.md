@@ -4,42 +4,112 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/antiantiops/gemini-wrapper)](https://hub.docker.com/r/antiantiops/gemini-wrapper)
 [![Docker Image Size](https://img.shields.io/docker/image-size/antiantiops/gemini-wrapper/latest)](https://hub.docker.com/r/antiantiops/gemini-wrapper)
 
-A Go REST API wrapper for Google's Gemini CLI using Echo framework. This service provides a simple HTTP interface to interact with Gemini AI programmatically using Gemini CLI's headless mode.
+A Go REST API wrapper for Google's Gemini CLI. Provides a simple HTTP interface to interact with Gemini AI.
 
-🐳 **Pre-built Docker images available on Docker Hub**: https://hub.docker.com/r/antiantiops/gemini-wrapper
+🐳 **Pre-built Docker images**: https://hub.docker.com/r/antiantiops/gemini-wrapper
 
-## Features
+---
 
-- ✅ REST API interface for Gemini CLI
-- ✅ **Uses Gemini CLI headless mode** (clean JSON responses)
-- ✅ **Pre-built multi-platform Docker images** (amd64, arm64)
-- ✅ Host-based authentication (no API keys in config)
-- ✅ Built with Go and Echo framework
-- ✅ Simple, reliable command execution
-- ✅ Thread-safe request processing
-- ✅ Health check endpoint
-- ✅ CORS enabled
+## 🚨 READ THIS FIRST
 
-## Quick Start (Using Docker Hub)
+### You Do NOT Need to Install Gemini CLI on Your Computer!
 
-### Step 1: Authenticate Gemini CLI on Your Host
-
+**❌ WRONG (Traditional Method):**
 ```bash
-# Install Gemini CLI (requires Node.js 20+)
+# DON'T DO THIS - You don't need to install on localhost!
 npm install -g @google/gemini-cli
-
-# Authenticate (opens browser for Google login)
 gemini
 ```
 
-This stores your credentials in `~/.gemini` folder.
+**✅ CORRECT (Our Method):**
+```bash
+# Just start the container - Gemini CLI is already inside!
+docker run -d -p 8080:8080 -v ~/.gemini:/app/.gemini --name gemini-wrapper antiantiops/gemini-wrapper:latest
 
-### Step 2: Pull and Run from Docker Hub
+# Then authenticate INSIDE the container
+docker exec -it gemini-wrapper sh -c 'gemini'
+# Select "1. Login with Google" (NOT API Key!)
+```
+
+**Why our method is better:**
+- ✅ No Node.js installation on your computer
+- ✅ No npm packages on your computer  
+- ✅ No Gemini CLI installation on your computer
+- ✅ Everything isolated in Docker
+- ✅ Only Docker required
+
+---
+
+## 🎯 How It Works
+
+**You do NOT need to install anything on your computer except Docker!**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    YOUR COMPUTER (Host)                      │
+│                                                              │
+│  1. Create empty folder: ~/.gemini                          │
+│  2. Run Docker container with mount                         │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+                           ↓ Mount
+┌─────────────────────────────────────────────────────────────┐
+│                   DOCKER CONTAINER                           │
+│                                                              │
+│  • Gemini CLI pre-installed ✅                               │
+│  • Node.js pre-installed ✅                                  │
+│  • Go application pre-installed ✅                           │
+│                                                              │
+│  3. You run: gemini (inside container)                      │
+│  4. Select "1. Login with Google"                           │
+│  5. Authenticate via browser OAuth                          │
+│  6. Credentials saved to /app/.gemini                       │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+                           ↓ Mount (bidirectional)
+┌─────────────────────────────────────────────────────────────┐
+│                    YOUR COMPUTER (Host)                      │
+│                                                              │
+│  7. Credentials appear in: ~/.gemini ✅                      │
+│  8. Container can now access Google Gemini API ✅            │
+│  9. Your REST API is ready! ✅                               │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Key Points:**
+- ✅ **No localhost installation** - Everything runs in Docker
+- ✅ **Authenticate in container** - Not on your computer
+- ✅ **Must use "Login with Google"** - API Key option won't work
+- ✅ **Credentials shared via mount** - Saved to both container and host
+
+---
+
+## ⚡ Quick Start (3 Steps)
+
+### Prerequisites
+
+**✅ Only Docker is required!**
+
+**❌ You do NOT need to:**
+- Install Node.js on your computer
+- Install Gemini CLI on your computer
+- Install npm on your computer
+
+**Everything is already inside the Docker container!**
+
+---
+
+### Step 1: Create Empty Folder and Start Container
+
+**What happens:** Create an empty folder for credentials, then start the container with this folder mounted.
 
 **Linux/Mac:**
 ```bash
-docker pull antiantiops/gemini-wrapper:latest
+# Create empty folder for credentials
+mkdir -p ~/.gemini
 
+# Start container with mount
 docker run -d -p 8080:8080 \
   -v ~/.gemini:/app/.gemini \
   --name gemini-wrapper \
@@ -48,23 +118,81 @@ docker run -d -p 8080:8080 \
 
 **Windows (PowerShell):**
 ```powershell
-docker pull antiantiops/gemini-wrapper:latest
+# Create empty folder for credentials
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini"
 
+# Start container with mount
 docker run -d -p 8080:8080 `
   -v ${env:USERPROFILE}\.gemini:/app/.gemini `
   --name gemini-wrapper `
   antiantiops/gemini-wrapper:latest
 ```
 
-**Note**: The volume is mounted as **read-write** so Gemini CLI can automatically refresh authentication tokens.
+**What this does:**
+- Creates an empty `~/.gemini` folder on your computer
+- Starts the container
+- Mounts `~/.gemini` (host) to `/app/.gemini` (container)
+- When you authenticate in the container, credentials are saved to both places
+
+---
+
+### Step 2: Authenticate INSIDE the Container
+
+**Important:** You authenticate **INSIDE the running Docker container**, not on your computer.
+
+Run this command to enter the container and start authentication:
+
+```bash
+docker exec -it gemini-wrapper sh -c 'export HOME=/app && export GEMINI_CONFIG_DIR=/app/.gemini && cd /app && gemini'
+```
+
+**You'll see this menu:**
+
+```
+How would you like to authenticate for this project?
+
+  ● 1. Login with Google         ← Type "1" and press Enter
+    2. Use Gemini API Key         ← DO NOT select this
+    3. Vertex AI                  ← DO NOT select this
+
+No authentication method selected.
+```
+
+⚠️ **CRITICAL: You MUST type `1` and press Enter**
+
+**Why "Login with Google" only?**
+- ✅ Option 1 (Login with Google) - Works with this project
+- ❌ Option 2 (Gemini API Key) - Will NOT work
+- ❌ Option 3 (Vertex AI) - For enterprise Google Cloud only
+
+**After selecting "1", follow these steps:**
+
+1. Terminal shows a long URL: `https://accounts.google.com/o/oauth2/v2/auth?...`
+2. **Copy the entire URL**
+3. **Open it in your browser** (on your host computer)
+4. **Sign in with Google** and grant permissions
+5. Browser shows an authorization code
+6. **Copy the authorization code**
+7. **Go back to the container terminal** and paste the code
+8. **Press Enter**
+9. You'll see "Authentication successful!" ✓
+
+**What happened:**
+- You authenticated inside the container
+- Credentials were saved to `/app/.gemini` (inside container)
+- Because `/app/.gemini` is mounted to `~/.gemini` (on your computer)
+- The credentials are now available on both your computer AND in the container
+
+**Restart the container:**
+```bash
+docker restart gemini-wrapper
+```
+
+---
 
 ### Step 3: Test the API
 
 ```bash
-# Health check
-curl http://localhost:8080/
-
-# Ask a question
 curl -X POST http://localhost:8080/api/ask \
   -H "Content-Type: application/json" \
   -d '{"question": "What is 2+2?"}'
@@ -77,210 +205,51 @@ curl -X POST http://localhost:8080/api/ask \
 }
 ```
 
-That's it! 🎉
-
-## Using Docker Compose
-
-### Create docker-compose.yml
-
-**Linux/Mac:**
-```yaml
-version: '3.8'
-
-services:
-  gemini-wrapper:
-    image: antiantiops/gemini-wrapper:latest
-    container_name: gemini-wrapper
-    ports:
-      - "8080:8080"
-    volumes:
-      - ${HOME}/.gemini:/app/.gemini  # Read-write for token renewal
-    restart: unless-stopped
-```
-
-**Windows:**
-```yaml
-version: '3.8'
-
-services:
-  gemini-wrapper:
-    image: antiantiops/gemini-wrapper:latest
-    container_name: gemini-wrapper
-    ports:
-      - "8080:8080"
-    volumes:
-      - ${USERPROFILE}/.gemini:/app/.gemini  # Read-write for token renewal
-    restart: unless-stopped
-```
-
-### Run with Docker Compose
-
-```bash
-# Start
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
-```
-
-## Docker Hub Images
-
-🐳 **Repository**: https://hub.docker.com/r/antiantiops/gemini-wrapper
-
-### Available Tags
-
-| Tag | Description | Recommended For |
-|-----|-------------|-----------------|
-| `latest` | Latest stable build from main branch | Development, testing |
-| `1.0.0` | Specific version (when released) | Production (pin versions) |
-| `1.0` | Major.minor version | Auto-patch updates |
-| `1` | Major version | Auto-minor updates |
-
-### Multi-Platform Support
-
-Images are automatically built for multiple architectures:
-- **linux/amd64** - Intel/AMD processors (x86_64)
-- **linux/arm64** - ARM processors (Apple M1/M2, Raspberry Pi, AWS Graviton)
-
-Docker automatically selects the correct architecture for your platform.
-
-### Image Size
-
-Approximately **350-400 MB** (includes Node.js 20, Gemini CLI, and Go application)
-
-## API Endpoints
-
-The service provides **two API formats**:
-
-1. **Simple API** - Easy-to-use format (recommended for new projects)
-2. **Gemini API Compatible** - Drop-in replacement for official Gemini API
-
-### Health Check
-
-```http
-GET /
-```
-
-**Response:**
-```json
-{
-  "message": "Gemini Wrapper API",
-  "status": "running"
-}
-```
+**✅ That's it! Your Gemini API is ready to use.**
 
 ---
 
-### Format 1: Simple API (Recommended)
+## 📝 Quick Summary
 
-```http
-POST /api/ask
-Content-Type: application/json
-```
+### What You Just Did:
 
-**Request:**
-```json
-{
-  "question": "Your question here",
-  "model": "gemini-2.5-flash"
-}
-```
+1. ✅ Created empty folder: `~/.gemini` on your computer
+2. ✅ Started Docker container with folder mounted
+3. ✅ Ran `gemini` command **INSIDE the container** (not on your computer!)
+4. ✅ Selected **"1. Login with Google"** (not API Key!)
+5. ✅ Authenticated via browser OAuth
+6. ✅ Credentials saved to container's `/app/.gemini`
+7. ✅ Credentials automatically appear in your `~/.gemini` (via mount)
+8. ✅ Restarted container
+9. ✅ API is now working!
 
-**Response:**
-```json
-{
-  "answer": "The AI's response here"
-}
-```
+### What You Did NOT Do:
 
-**Example:**
+- ❌ Install Node.js on your computer
+- ❌ Install npm on your computer
+- ❌ Install Gemini CLI on your computer (`npm install -g @google/gemini-cli`)
+- ❌ Run `gemini` command on your computer
+- ❌ Use "Gemini API Key" option
+
+### Why This Approach?
+
+**Everything happens inside Docker:**
+- Gemini CLI is already installed in the container
+- You authenticate inside the container
+- Credentials are shared between container and host via mount
+- Your computer stays clean (no extra installations)
+
+---
+
+## 📡 API Usage
+
+### Simple API (Recommended)
+
 ```bash
+# Basic request
 curl -X POST http://localhost:8080/api/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "What is 2+2?"}'
-```
-
----
-
-### Format 2: Gemini API Compatible
-
-```http
-POST /v1beta/models/{model-name}
-Content-Type: application/json
-```
-
-**Request:**
-```json
-{
-  "contents": [
-    {
-      "parts": [
-        { "text": "Your question here" }
-      ]
-    }
-  ]
-}
-```
-
-**Response:**
-```json
-{
-  "model": "gemini-2.5-flash",
-  "candidates": [
-    {
-      "content": {
-        "parts": [
-          { "text": "The AI's response here" }
-        ]
-      }
-    }
-  ]
-}
-```
-
-**Example:**
-```bash
-curl -X POST http://localhost:8080/v1beta/models/gemini-2.5-flash \
-  -H "Content-Type: application/json" \
-  -d '{
-    "contents": [
-      {
-        "parts": [
-          { "text": "What is 2+2?" }
-        ]
-      }
-    ]
-  }'
-```
-
----
-
-### Available Models
-
-Both API formats support the same models:
-
-- **Auto-selection** - Don't specify model (Simple API only)
-- `gemini-2.5-flash` - ⚡⭐ Balanced (**recommended**)
-- `gemini-2.5-flash-lite` - ⚡ Fastest, cheapest
-- `gemini-2.5-pro` - ⭐⭐ Best quality
-- `gemini-2.0-flash-exp` - 🧪 Experimental
-
-⚠️ **Note**: Gemini 3 models may not be available yet.
-
-See [MODEL_SELECTION_GUIDE.md](MODEL_SELECTION_GUIDE.md) and [GEMINI_API_COMPATIBILITY.md](GEMINI_API_COMPATIBILITY.md) for details.
-
-## Usage Examples
-
-### cURL - Simple API
-
-```bash
-# Default (auto-select model)
-curl -X POST http://localhost:8080/api/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Explain quantum computing in simple terms"}'
+  -d '{"question": "What is machine learning?"}'
 
 # With specific model
 curl -X POST http://localhost:8080/api/ask \
@@ -291,472 +260,359 @@ curl -X POST http://localhost:8080/api/ask \
   }'
 ```
 
-### cURL - Gemini API Format
+**Response:**
+```json
+{
+  "answer": "Machine learning is a subset of artificial intelligence..."
+}
+```
+
+### Gemini API Compatible Format
 
 ```bash
-# Gemini API compatible format
 curl -X POST http://localhost:8080/v1beta/models/gemini-2.5-flash \
   -H "Content-Type: application/json" \
   -d '{
     "contents": [
       {
         "parts": [
-          { "text": "Explain quantum computing in simple terms" }
+          {"text": "What is machine learning?"}
         ]
       }
     ]
   }'
 ```
 
-### Python
-
-```python
-import requests
-
-response = requests.post(
-    "http://localhost:8080/api/ask",
-    json={"question": "What is machine learning?"}
-)
-
-result = response.json()
-print(result["answer"])
-```
-
-### JavaScript/Node.js
-
-```javascript
-const response = await fetch('http://localhost:8080/api/ask', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    question: 'Explain REST APIs'
-  })
-});
-
-const data = await response.json();
-console.log(data.answer);
-```
-
-### Go
-
-```go
-package main
-
-import (
-    "bytes"
-    "encoding/json"
-    "fmt"
-    "net/http"
-)
-
-func main() {
-    reqBody := map[string]string{
-        "question": "What is Go programming language?",
+**Response:**
+```json
+{
+  "model": "gemini-2.5-flash",
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {"text": "Machine learning is..."}
+        ]
+      }
     }
-    
-    jsonData, _ := json.Marshal(reqBody)
-    resp, _ := http.Post(
-        "http://localhost:8080/api/ask",
-        "application/json",
-        bytes.NewBuffer(jsonData),
-    )
-    
-    var result map[string]string
-    json.NewDecoder(resp.Body).Decode(&result)
-    fmt.Println(result["answer"])
+  ]
 }
 ```
 
-## Authentication
+---
 
-This application uses **host-based authentication**:
+## 🎯 Available Models
 
-1. You authenticate Gemini CLI once on your host machine
-2. The Docker container mounts your `~/.gemini` credentials folder
-3. Container uses your authenticated session automatically
+| Model | Speed | Quality | Best For | Cost |
+|-------|-------|---------|----------|------|
+| `gemini-2.5-flash-lite` | ⚡⚡⚡ Fastest | ⭐⭐ Good | Quick answers, chat | Lowest |
+| `gemini-2.5-flash` | ⚡⚡ Fast | ⭐⭐⭐ Great | Most tasks (default) | Low |
+| `gemini-2.5-pro` | ⚡ Slower | ⭐⭐⭐⭐ Best | Complex tasks, research | Higher |
 
-**Benefits:**
-- ✅ No API keys in environment variables
-- ✅ Persistent authentication with automatic token renewal
-- ✅ Secure credential management
-- ✅ Easy to use
-
-### Important: Volume Mount Permissions
-
-The `.gemini` folder is mounted as **read-write** (not read-only) because Gemini CLI needs to automatically refresh OAuth tokens. Without write access, token renewal will fail and the container will stop working when tokens expire.
+**Examples:**
 
 ```bash
-# Correct - allows token renewal
--v ~/.gemini:/app/.gemini
-
-# Wrong - blocks token renewal
--v ~/.gemini:/app/.gemini:ro  # Don't use :ro!
-```
-
-See [VOLUME_MOUNT_EXPLANATION.md](VOLUME_MOUNT_EXPLANATION.md) for detailed explanation.
-
-## Prerequisites
-
-- **Docker** installed and running
-- **Node.js 20+** (for Gemini CLI authentication)
-- **Gemini CLI** installed: `npm install -g @google/gemini-cli`
-- **Authenticated** with Gemini: Run `gemini` and complete login
-
-## Common Commands
-
-### Pull Latest Image
-
-```bash
-docker pull antiantiops/gemini-wrapper:latest
-```
-
-### Run Container
-
-```bash
-# Linux/Mac
-docker run -d -p 8080:8080 \
-  -v ~/.gemini:/app/.gemini \
-  --name gemini-wrapper \
-  antiantiops/gemini-wrapper:latest
-
-# Windows
-docker run -d -p 8080:8080 `
-  -v ${env:USERPROFILE}\.gemini:/app/.gemini `
-  --name gemini-wrapper `
-  antiantiops/gemini-wrapper:latest
-```
-
-### View Logs
-
-```bash
-docker logs -f gemini-wrapper
-```
-
-### Stop Container
-
-```bash
-docker stop gemini-wrapper
-```
-
-### Start Container
-
-```bash
-docker start gemini-wrapper
-```
-
-### Remove Container
-
-```bash
-docker rm -f gemini-wrapper
-```
-
-### Update to Latest
-
-```bash
-docker stop gemini-wrapper
-docker rm gemini-wrapper
-docker pull antiantiops/gemini-wrapper:latest
-docker run -d -p 8080:8080 \
-  -v ~/.gemini:/app/.gemini \
-  --name gemini-wrapper \
-  antiantiops/gemini-wrapper:latest
-```
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | 8080 | HTTP server port |
-| `HOME` | /app | Home directory |
-| `GEMINI_CONFIG_DIR` | /app/.gemini | Gemini config directory |
-
-Override when running:
-```bash
-docker run -d -p 9000:9000 \
-  -e PORT=9000 \
-  -v ~/.gemini:/app/.gemini \
-  antiantiops/gemini-wrapper:latest
-```
-
-## Troubleshooting
-
-### "Authentication failed" or "No credentials found"
-
-**Solution:**
-```bash
-# Verify credentials exist
-ls ~/.gemini  # Linux/Mac
-dir %USERPROFILE%\.gemini  # Windows
-
-# Re-authenticate if needed
-gemini
-```
-
-### "Port already in use"
-
-**Solution:**
-```bash
-# Use different port
-docker run -d -p 9000:8080 ...
-```
-
-### "Permission denied" on credentials
-
-**Solution (Linux/Mac):**
-```bash
-chmod -R 755 ~/.gemini
-```
-
-### Container won't start
-
-**Solution:**
-```bash
-# Check logs
-docker logs gemini-wrapper
-
-# Verify Docker is running
-docker ps
-
-# Check if port is available
-netstat -an | grep 8080
-```
-
-### "timeout waiting for gemini response"
-
-**Solution:**
-```bash
-# Test gemini CLI directly in container
-docker exec gemini-wrapper gemini --prompt "test" --output-format json
-
-# Check credentials are mounted
-docker exec gemini-wrapper ls -la /app/.gemini
-
-# Verify gemini CLI is installed
-docker exec gemini-wrapper gemini --version
-```
-
-### "Please visit the following URL to authorize" (Container asks for auth)
-
-This means your credentials are expired or not mounted properly.
-
-**Solution:**
-```bash
-# 1. Stop container
-docker stop gemini-wrapper
-
-# 2. Re-authenticate on HOST (not in container)
-gemini
-# Complete browser authentication
-
-# 3. Verify it works on host
-gemini --prompt "test" --output-format json
-
-# 4. Restart container
-docker start gemini-wrapper
-
-# 5. Test API
+# Fast and cheap (flash-lite)
 curl -X POST http://localhost:8080/api/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "test"}'
+  -d '{"question": "Hi!", "model": "gemini-2.5-flash-lite"}'
+
+# Balanced (flash) - DEFAULT if you don't specify model
+curl -X POST http://localhost:8080/api/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Explain Docker"}'
+
+# High quality (pro)
+curl -X POST http://localhost:8080/api/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Write a research paper on AI", "model": "gemini-2.5-pro"}'
 ```
 
-**Key**: The container **cannot open a browser**. You MUST authenticate on your host machine first, then the container uses your credentials via the mounted volume.
+---
 
-See [AUTHENTICATION_RENEWAL.md](AUTHENTICATION_RENEWAL.md) for detailed troubleshooting.
+## 🔧 Common Commands
 
-## Building from Source (Alternative)
-
-If you prefer to build locally instead of using Docker Hub:
-
-### Prerequisites
-- Go 1.25+
-- Node.js 20+
-- Docker
-
-### Build and Run
+### Container Management
 
 ```bash
-# Clone repository
-git clone <your-repo-url>
-cd gemini-wrapper
+# View logs
+docker logs -f gemini-wrapper
 
-# Build Docker image
-docker build -t gemini-wrapper .
+# Restart container
+docker restart gemini-wrapper
 
-# Run
-docker run -d -p 8080:8080 \
-  -v ~/.gemini:/app/.gemini \
-  gemini-wrapper
+# Stop container
+docker stop gemini-wrapper
+
+# Start container
+docker start gemini-wrapper
+
+# Remove container
+docker rm -f gemini-wrapper
+
+# Update to latest image
+docker pull antiantiops/gemini-wrapper:latest
+docker rm -f gemini-wrapper
+# Then run Step 1 again
 ```
 
-## Architecture
+### Health Check
 
-This wrapper uses **Gemini CLI's headless mode** for clean, reliable interaction:
+```bash
+# Check if API is running
+curl http://localhost:8080/
 
-```
-API Request → Go Service → gemini --prompt "question" --output-format json
-                              ↓
-                         Clean JSON Response
-                              ↓
-                         Parse & Return
+# Response: {"message":"Gemini Wrapper API","status":"running"}
 ```
 
-### Benefits of Headless Mode
-- ✅ **Simple**: 75% less code than TUI parsing
-- ✅ **Reliable**: Official Gemini CLI API
-- ✅ **Clean output**: Structured JSON, no UI elements
-- ✅ **Easy to maintain**: Stateless command execution
+---
 
-## Project Structure
+## 💡 Troubleshooting
 
+### ❌ Common Mistake: Installing on localhost
+
+**Symptom:** Trying to run `npm install -g @google/gemini-cli` or `gemini` on your computer
+
+**Why this is wrong:**
+- You don't need to install anything on your computer
+- Gemini CLI is already inside the Docker container
+- Authentication happens inside the container
+
+**Correct approach:**
+```bash
+# Don't install on localhost - just run these:
+docker exec -it gemini-wrapper sh -c 'export HOME=/app && gemini'
+# Then authenticate inside container
 ```
-gemini-wrapper/
-├── main.go                 # HTTP server and API routes
-├── gemini_service.go       # Gemini CLI headless mode integration (~100 lines)
-├── gemini_service_test.go  # Unit tests
-├── Dockerfile              # Multi-stage Docker build
-├── docker-compose.yml      # Container orchestration
-├── go.mod                  # Go dependencies
-├── HEADLESS_MODE.md        # Architecture documentation
-└── README.md              # This file
+
+---
+
+### Issue: "authentication required" error
+
+**Cause:** Not authenticated yet, or credentials expired
+
+**Solution:** Authenticate inside container:
+```bash
+docker exec -it gemini-wrapper sh -c 'export HOME=/app && export GEMINI_CONFIG_DIR=/app/.gemini && cd /app && gemini'
 ```
 
-## Technology Stack
+**IMPORTANT:** When you see the menu, type **`1`** to select "Login with Google"
 
-- **Language**: Go 1.25
-- **Framework**: Echo v4 (HTTP)
-- **Gemini CLI**: Headless mode (JSON output)
-- **Runtime**: Node.js 20 (for Gemini CLI)
-- **Container**: Docker (Alpine Linux)
+---
 
-## Security
+### Issue: Selected "2. Use Gemini API Key" by mistake
 
-- ✅ Container runs as root (required for Gemini CLI operations)
-- ✅ Read-write credential mount (for token renewal)
-- ✅ No API keys in environment variables
-- ✅ Automatic token refresh by Gemini CLI
-- ✅ CORS can be configured
-- ✅ Standard Docker isolation applies
+**Symptom:** Authentication seems to work but API returns errors
 
-## Performance
+**Cause:** You selected wrong option - this project requires "Login with Google"
 
-- **Throughput**: ~1-2 requests per second per instance (concurrent safe)
-- **Latency**: 2-10 seconds average (depends on Gemini API and question complexity)
-- **Memory**: ~100-200 MB per instance
-- **CPU**: Low (mostly I/O waiting for Gemini API)
-- **Process overhead**: Each request spawns a gemini CLI process (lightweight)
+**Solution:** Remove credentials and re-authenticate with correct option:
+```bash
+# Remove wrong credentials
+rm -rf ~/.gemini/*
 
-**Scaling**: Run multiple containers behind a load balancer for higher throughput.
+# Re-authenticate INSIDE container
+docker exec -it gemini-wrapper sh -c 'export HOME=/app && export GEMINI_CONFIG_DIR=/app/.gemini && cd /app && gemini'
 
-### Why Fast?
-- Uses Gemini CLI's optimized headless mode
-- Clean JSON parsing (no TUI overhead)
-- Stateless execution (no session management)
+# This time, select "1. Login with Google" (NOT "2. Use Gemini API Key")
 
-## Production Deployment
+# Restart container
+docker restart gemini-wrapper
+```
 
-### Recommended Setup
+---
+
+### Issue: Container starts but no response
+
+**Solution:** Check logs:
+```bash
+docker logs gemini-wrapper
+```
+
+Look for authentication errors or model errors.
+
+---
+
+### Issue: Want to use a different Google account
+
+**Solution:** Remove credentials and re-authenticate:
+```bash
+# Remove old credentials
+rm -rf ~/.gemini/*
+
+# Re-authenticate inside container
+docker exec -it gemini-wrapper sh -c 'export HOME=/app && export GEMINI_CONFIG_DIR=/app/.gemini && cd /app && gemini'
+# Select "1. Login with Google"
+# Use different Google account in browser
+
+# Restart
+docker restart gemini-wrapper
+```
+
+---
+
+### Issue: Model not found error
+
+**Cause:** Using preview or unavailable models
+
+**Solution:** Use stable models only:
+- ✅ `gemini-2.5-flash-lite`
+- ✅ `gemini-2.5-flash`
+- ✅ `gemini-2.5-pro`
+
+Avoid preview models like `gemini-3-pro` (they may not be available yet).
+
+**Example:**
+```bash
+# Good - uses stable model
+curl -X POST http://localhost:8080/api/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Hi", "model": "gemini-2.5-flash"}'
+
+# Bad - preview model may not exist
+curl -X POST http://localhost:8080/api/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Hi", "model": "gemini-3-pro"}'
+```
+
+---
+
+## 🐳 Using Docker Compose (Optional)
+
+Create `docker-compose.yml`:
 
 ```yaml
 version: '3.8'
 
 services:
   gemini-wrapper:
-    image: antiantiops/gemini-wrapper:1.0.0  # Pin to specific version
+    image: antiantiops/gemini-wrapper:latest
     container_name: gemini-wrapper
     ports:
       - "8080:8080"
     volumes:
-      - ${HOME}/.gemini:/app/.gemini  # Read-write for token renewal
-    restart: always
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      - ${HOME}/.gemini:/app/.gemini  # Linux/Mac
+      # - ${USERPROFILE}/.gemini:/app/.gemini  # Windows (uncomment this, comment above)
+    restart: unless-stopped
 ```
 
-### Best Practices
+Run:
+```bash
+docker-compose up -d
+```
 
-1. **Pin versions in production**: Use `antiantiops/gemini-wrapper:1.0.0` instead of `:latest`
-2. **Set resource limits**: Prevent container from consuming too many resources
-3. **Use health checks**: Automatic restart on failures
-4. **Monitor logs**: `docker logs -f gemini-wrapper`
-5. **Regular updates**: Pull new versions and test before deploying
-6. **Reverse proxy**: Use nginx or Caddy for SSL/TLS termination
+---
 
-## Documentation
+## 🛠️ Building from Source (Advanced)
 
-- **[MODEL_SELECTION_GUIDE.md](MODEL_SELECTION_GUIDE.md)**: Complete guide to choosing the right model
-- **[HEADLESS_MODE.md](HEADLESS_MODE.md)**: Architecture and implementation details
-- **[AUTHENTICATION.md](AUTHENTICATION.md)**: Authentication setup guide
-- **[JSON_PARSING_FIX.md](JSON_PARSING_FIX.md)**: How response parsing works
+```bash
+# Clone repository
+git clone https://github.com/yourusername/gemini-wrapper.git
+cd gemini-wrapper
+
+# Build Docker image
+docker build -t gemini-wrapper .
+
+# Run
+docker run -d -p 8080:8080 -v ~/.gemini:/app/.gemini --name gemini-wrapper gemini-wrapper
+```
+
+---
+
+## 📚 Technical Details
+
+### Features
+
+- ✅ REST API interface for Gemini CLI
+- ✅ Two API formats (Simple + Gemini API compatible)
+- ✅ Headless mode (clean JSON responses)
+- ✅ Multi-platform Docker images (amd64, arm64)
+- ✅ OAuth-based authentication
+- ✅ Built with Go and Echo framework
+- ✅ Thread-safe request processing
+
+### Architecture
+
+```
+Client → REST API (Echo/Go) → Gemini CLI → Google Gemini API
+```
+
+The wrapper executes `gemini --prompt "question" --output-format json` for each request and returns the structured response.
+
+### Multi-Platform Support
+
+Images are automatically built for:
+- **linux/amd64** - Intel/AMD processors
+- **linux/arm64** - ARM processors (Apple M1/M2, Raspberry Pi, AWS Graviton)
+
+### Image Size
+
+Approximately **350-400 MB** (includes Node.js 20, Gemini CLI, and Go application)
+
+---
+
+## 📖 Additional Documentation
+
+For more detailed guides, see:
+- [CONTAINER_AUTHENTICATION.md](CONTAINER_AUTHENTICATION.md) - Detailed authentication guide
+- [START_HERE.md](START_HERE.md) - Alternative quick start guide
+- [ONE_COMMAND_SETUP.md](ONE_COMMAND_SETUP.md) - One-command setup script
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+---
+
+## 📄 License
+
+This project is open source and available under the MIT License.
+
+---
+
+## ⚠️ Important Notes
+
+### Authentication
+
+1. **✅ DO NOT install Gemini CLI on your computer** - It's already in the container
+2. **✅ Authenticate INSIDE the container** - Use `docker exec` command
+3. **✅ Always select "1. Login with Google"** when you see the menu
+4. **❌ DO NOT use "2. Use Gemini API Key"** - This option will NOT work
+5. **❌ DO NOT use "3. Vertex AI"** - This is for enterprise Google Cloud only
+
+### Why This Approach?
+
+**Traditional approach (NOT needed here):**
+```bash
+❌ npm install -g @google/gemini-cli  # Not needed!
+❌ gemini                              # Not needed!
+```
+
+**Our approach (correct):**
+```bash
+✅ docker run ...                      # Start container
+✅ docker exec ... gemini              # Authenticate inside container
+✅ Select "1. Login with Google"       # Use Google OAuth
+```
+
+### Model Selection
+
+6. **Use stable models** for best reliability:
+   - ✅ `gemini-2.5-flash-lite`
+   - ✅ `gemini-2.5-flash`
+   - ✅ `gemini-2.5-pro`
+   - ❌ Avoid preview models like `gemini-3-pro`
+
+---
+
+## 🔗 Links
+
 - **Docker Hub**: https://hub.docker.com/r/antiantiops/gemini-wrapper
-
-## How It Works
-
-This wrapper leverages Gemini CLI's headless mode for programmatic access:
-
-```bash
-# What happens under the hood:
-gemini --prompt "Your question" --output-format json
-```
-
-Returns clean JSON:
-```json
-{
-  "response": "The answer to your question",
-  "stats": {
-    "models": {...},
-    "tokens": {...}
-  }
-}
-```
-
-No TUI parsing, no spinners, no ASCII art - just clean, structured data.
-
-### Advantages Over TUI Parsing
-- ✅ **75% less code** (436 lines → 105 lines)
-- ✅ **More reliable** (official API vs screen scraping)
-- ✅ **Easier to maintain** (stateless vs complex state machine)
-- ✅ **Cleaner output** (JSON vs filtered TUI text)
-
-See [HEADLESS_MODE.md](HEADLESS_MODE.md) for complete technical details.
-
-## License
-
-MIT License - Free to use and modify
+- **GitHub**: https://github.com/yourusername/gemini-wrapper
+- **Gemini CLI**: https://geminicli.com/
 
 ---
 
-## Quick Reference
-
-```bash
-# Install Gemini CLI and authenticate
-npm install -g @google/gemini-cli
-gemini
-
-# Pull and run
-docker pull antiantiops/gemini-wrapper:latest
-docker run -d -p 8080:8080 -v ~/.gemini:/app/.gemini antiantiops/gemini-wrapper:latest
-
-# Test
-curl -X POST http://localhost:8080/api/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Hello!"}'
-
-# View logs
-docker logs -f gemini-wrapper
-```
-
----
-
-**Ready to use! Pull the image and start querying Gemini AI through a REST API.** 🚀
+**Made with ❤️ using Go, Echo, and Google's Gemini CLI**
