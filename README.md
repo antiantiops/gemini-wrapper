@@ -153,6 +153,11 @@ Approximately **350-400 MB** (includes Node.js 20, Gemini CLI, and Go applicatio
 
 ## API Endpoints
 
+The service provides **two API formats**:
+
+1. **Simple API** - Easy-to-use format (recommended for new projects)
+2. **Gemini API Compatible** - Drop-in replacement for official Gemini API
+
 ### Health Check
 
 ```http
@@ -167,53 +172,109 @@ GET /
 }
 ```
 
-### Ask Question
+---
+
+### Format 1: Simple API (Recommended)
 
 ```http
 POST /api/ask
 Content-Type: application/json
 ```
 
-**Request Body:**
+**Request:**
 ```json
 {
   "question": "Your question here",
-  "model": "gemini-3-flash"
+  "model": "gemini-2.5-flash"
 }
 ```
 
-**Parameters:**
-- `question` (required): Your question or prompt
-- `model` (optional): Gemini model to use (see [Model Selection Guide](MODEL_SELECTION_GUIDE.md))
-
-**Available Models:**
-- **Auto-selection** - Don't specify model (**recommended** - Gemini chooses best)
-- `gemini-2.5-flash` - ⚡⭐ Balanced (general use, **recommended**)
-- `gemini-2.5-flash-lite` - ⚡ Fastest, cheapest (simple questions)
-- `gemini-2.5-pro` - ⭐⭐ Best quality (complex tasks)
-- `gemini-2.0-flash-exp` - 🧪 Experimental features
-
-⚠️ **Note**: Gemini 3 models (`gemini-3-flash`, `gemini-3-pro`) may not be available yet. Use auto-selection or Gemini 2.5 models.
-
-See [MODEL_SELECTION_GUIDE.md](MODEL_SELECTION_GUIDE.md) and [TROUBLESHOOTING_MODELS.md](TROUBLESHOOTING_MODELS.md) for details.
-
-**Response (Success):**
+**Response:**
 ```json
 {
   "answer": "The AI's response here"
 }
 ```
 
-**Response (Error):**
+**Example:**
+```bash
+curl -X POST http://localhost:8080/api/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is 2+2?"}'
+```
+
+---
+
+### Format 2: Gemini API Compatible
+
+```http
+POST /v1beta/models/{model-name}
+Content-Type: application/json
+```
+
+**Request:**
 ```json
 {
-  "error": "Error message"
+  "contents": [
+    {
+      "parts": [
+        { "text": "Your question here" }
+      ]
+    }
+  ]
 }
 ```
 
+**Response:**
+```json
+{
+  "model": "gemini-2.5-flash",
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          { "text": "The AI's response here" }
+        ]
+      }
+    }
+  ]
+}
+```
+
+**Example:**
+```bash
+curl -X POST http://localhost:8080/v1beta/models/gemini-2.5-flash \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contents": [
+      {
+        "parts": [
+          { "text": "What is 2+2?" }
+        ]
+      }
+    ]
+  }'
+```
+
+---
+
+### Available Models
+
+Both API formats support the same models:
+
+- **Auto-selection** - Don't specify model (Simple API only)
+- `gemini-2.5-flash` - ⚡⭐ Balanced (**recommended**)
+- `gemini-2.5-flash-lite` - ⚡ Fastest, cheapest
+- `gemini-2.5-pro` - ⭐⭐ Best quality
+- `gemini-2.0-flash-exp` - 🧪 Experimental
+
+⚠️ **Note**: Gemini 3 models may not be available yet.
+
+See [MODEL_SELECTION_GUIDE.md](MODEL_SELECTION_GUIDE.md) and [GEMINI_API_COMPATIBILITY.md](GEMINI_API_COMPATIBILITY.md) for details.
+
 ## Usage Examples
 
-### cURL
+### cURL - Simple API
 
 ```bash
 # Default (auto-select model)
@@ -227,6 +288,23 @@ curl -X POST http://localhost:8080/api/ask \
   -d '{
     "question": "Explain quantum computing",
     "model": "gemini-2.5-flash"
+  }'
+```
+
+### cURL - Gemini API Format
+
+```bash
+# Gemini API compatible format
+curl -X POST http://localhost:8080/v1beta/models/gemini-2.5-flash \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contents": [
+      {
+        "parts": [
+          { "text": "Explain quantum computing in simple terms" }
+        ]
+      }
+    ]
   }'
 ```
 
@@ -456,6 +534,35 @@ docker exec gemini-wrapper ls -la /app/.gemini
 # Verify gemini CLI is installed
 docker exec gemini-wrapper gemini --version
 ```
+
+### "Please visit the following URL to authorize" (Container asks for auth)
+
+This means your credentials are expired or not mounted properly.
+
+**Solution:**
+```bash
+# 1. Stop container
+docker stop gemini-wrapper
+
+# 2. Re-authenticate on HOST (not in container)
+gemini
+# Complete browser authentication
+
+# 3. Verify it works on host
+gemini --prompt "test" --output-format json
+
+# 4. Restart container
+docker start gemini-wrapper
+
+# 5. Test API
+curl -X POST http://localhost:8080/api/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "test"}'
+```
+
+**Key**: The container **cannot open a browser**. You MUST authenticate on your host machine first, then the container uses your credentials via the mounted volume.
+
+See [AUTHENTICATION_RENEWAL.md](AUTHENTICATION_RENEWAL.md) for detailed troubleshooting.
 
 ## Building from Source (Alternative)
 

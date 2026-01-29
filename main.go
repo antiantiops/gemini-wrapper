@@ -34,6 +34,11 @@ func main() {
 		return handleAsk(c, geminiService)
 	})
 
+	// Gemini API compatible endpoint
+	e.POST("/v1beta/models/:model", func(c echo.Context) error {
+		return handleGeminiAPI(c, geminiService)
+	})
+
 	// Start server
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -80,4 +85,100 @@ func handleAsk(c echo.Context, service *GeminiService) error {
 	return c.JSON(http.StatusOK, AskResponse{
 		Answer: answer,
 	})
+}
+
+// Gemini API compatible request/response structures
+type GeminiAPIRequest struct {
+	Contents []struct {
+		Parts []struct {
+			Text string `json:"text"`
+		} `json:"parts"`
+	} `json:"contents"`
+}
+
+type GeminiAPIResponse struct {
+	Model      string `json:"model"`
+	Candidates []struct {
+		Content struct {
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"content"`
+	} `json:"candidates"`
+}
+
+// Handler for Gemini API compatible endpoint
+func handleGeminiAPI(c echo.Context, service *GeminiService) error {
+	// Get model from URL path
+	model := c.Param("model")
+
+	// Parse request body
+	var req GeminiAPIRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"error": map[string]interface{}{
+				"message": "Invalid request body",
+				"code":    400,
+			},
+		})
+	}
+
+	// Extract question from contents.parts.text
+	if len(req.Contents) == 0 || len(req.Contents[0].Parts) == 0 {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"error": map[string]interface{}{
+				"message": "contents[0].parts[0].text is required",
+				"code":    400,
+			},
+		})
+	}
+
+	question := req.Contents[0].Parts[0].Text
+	if question == "" {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"error": map[string]interface{}{
+				"message": "text content cannot be empty",
+				"code":    400,
+			},
+		})
+	}
+
+	// Call Gemini service
+	answer, err := service.Ask(question, model)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"error": map[string]interface{}{
+				"message": err.Error(),
+				"code":    500,
+			},
+		})
+	}
+
+	// Return response in Gemini API format
+	response := GeminiAPIResponse{
+		Model: model,
+		Candidates: []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		}{
+			{
+				Content: struct {
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				}{
+					Parts: []struct {
+						Text string `json:"text"`
+					}{
+						{Text: answer},
+					},
+				},
+			},
+		},
+	}
+
+	return c.JSON(http.StatusOK, response)
 }
