@@ -3,7 +3,6 @@ module gemini-wrapper
 go 1.25
 
 require (
-	github.com/creack/pty v1.1.21
 	github.com/labstack/echo/v4 v4.12.0
 )
 
