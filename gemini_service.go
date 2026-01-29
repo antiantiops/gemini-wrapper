@@ -69,12 +69,27 @@ func (s *GeminiService) Ask(question string, model string) (string, error) {
 		return "", fmt.Errorf("failed to execute gemini CLI: %v (output: %s)", err, string(output))
 	}
 
+	// The output may contain debug messages before the JSON
+	// Find the JSON object (starts with { and ends with })
+	outputStr := string(output)
+	jsonStart := strings.Index(outputStr, "{")
+	jsonEnd := strings.LastIndex(outputStr, "}")
+
+	if jsonStart == -1 || jsonEnd == -1 || jsonStart >= jsonEnd {
+		// No valid JSON found, return raw output
+		fmt.Printf("Warning: No valid JSON found in output\n")
+		return strings.TrimSpace(outputStr), nil
+	}
+
+	// Extract just the JSON part
+	jsonStr := outputStr[jsonStart : jsonEnd+1]
+
 	// Parse JSON response
 	var response GeminiResponse
-	if err := json.Unmarshal(output, &response); err != nil {
+	if err := json.Unmarshal([]byte(jsonStr), &response); err != nil {
 		// If JSON parsing fails, return raw output
 		fmt.Printf("Warning: Failed to parse JSON response: %v\n", err)
-		return strings.TrimSpace(string(output)), nil
+		return strings.TrimSpace(outputStr), nil
 	}
 
 	// Check for errors in response
