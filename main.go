@@ -55,8 +55,9 @@ type AskRequest struct {
 }
 
 type AskResponse struct {
-	Answer string `json:"answer"`
-	Error  string `json:"error,omitempty"`
+	Answer string        `json:"answer"`
+	Error  string        `json:"error,omitempty"`
+	Status *GeminiStatus `json:"status,omitempty"`
 }
 
 // Handler for /api/ask endpoint
@@ -75,15 +76,17 @@ func handleAsk(c echo.Context, service *GeminiService) error {
 	}
 
 	// Send question to Gemini CLI and get response
-	answer, err := service.Ask(req.Question, req.Model)
+	answer, status, err := service.Ask(req.Question, req.Model)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, AskResponse{
-			Error: err.Error(),
+			Error:  err.Error(),
+			Status: status,
 		})
 	}
 
 	return c.JSON(http.StatusOK, AskResponse{
 		Answer: answer,
+		Status: status,
 	})
 }
 
@@ -105,6 +108,7 @@ type GeminiAPIResponse struct {
 			} `json:"parts"`
 		} `json:"content"`
 	} `json:"candidates"`
+	Status *GeminiStatus `json:"status,omitempty"`
 }
 
 // Handler for Gemini API compatible endpoint
@@ -144,7 +148,7 @@ func handleGeminiAPI(c echo.Context, service *GeminiService) error {
 	}
 
 	// Call Gemini service
-	answer, err := service.Ask(question, model)
+	answer, status, err := service.Ask(question, model)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"error": map[string]interface{}{
@@ -156,7 +160,8 @@ func handleGeminiAPI(c echo.Context, service *GeminiService) error {
 
 	// Return response in Gemini API format
 	response := GeminiAPIResponse{
-		Model: model,
+		Model:  model,
+		Status: status,
 		Candidates: []struct {
 			Content struct {
 				Parts []struct {
