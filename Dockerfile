@@ -16,31 +16,28 @@ RUN go mod download
 COPY *.go ./
 
 # Build the application
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o gemini-wrapper .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -o gemini-wrapper .
 
 # Runtime stage
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 
 # Install build dependencies for native modules and runtime dependencies
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     bash \
     curl \
     wget \
-  git \
-  libc6-compat \
+    git \
     python3 \
     make \
     g++ \
-    && ln -sf python3 /usr/bin/python
+    && ln -sf python3 /usr/bin/python \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Gemini CLI (has native dependencies that need compilation)
 RUN npm install -g @google/gemini-cli@0.35.2 && \
     gemini --version && \
     echo "✓ Gemini CLI installed successfully"
-
-# Clean up build dependencies to reduce image size
-RUN apk del python3 make g++
 
 # Set up working directory
 WORKDIR /app
