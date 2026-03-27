@@ -27,6 +27,8 @@ RUN apk add --no-cache \
     bash \
     curl \
     wget \
+  git \
+  libc6-compat \
     python3 \
     make \
     g++ \
