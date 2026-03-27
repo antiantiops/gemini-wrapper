@@ -33,7 +33,7 @@ RUN apk add --no-cache \
     && ln -sf python3 /usr/bin/python
 
 # Install Gemini CLI (has native dependencies that need compilation)
-RUN npm install -g @google/gemini-cli && \
+RUN npm install -g @google/gemini-cli@0.35.2 && \
     gemini --version && \
     echo "✓ Gemini CLI installed successfully"
 
