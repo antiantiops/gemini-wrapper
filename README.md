@@ -301,6 +301,29 @@ curl -X POST http://localhost:8080/v1beta/models/gemini-2.5-flash \
 
 ---
 
+## OpenAI-Compatible API
+
+This backend exposes OpenAI-compatible endpoints and forwards generation traffic to Gemini CLI:
+
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- `POST /v1/completions`
+
+Example request:
+
+```bash
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-2.5-flash",
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ]
+  }'
+```
+
+---
+
 ## 🎯 Available Models
 
 | Model | Speed | Quality | Best For | Cost |
