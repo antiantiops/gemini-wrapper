@@ -12,7 +12,6 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKER_HUB_USERNAME: underndogg
   IMAGE_NAME: antiantiops/gemini-wrapper
 
 jobs:
