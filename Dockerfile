@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Gemini CLI (has native dependencies that need compilation)
-RUN npm install -g @google/gemini-cli@0.35.2 && \
+RUN npm install -g @google/gemini-cli@0.35.3 && \
     gemini --version && \
     echo "✓ Gemini CLI installed successfully"
 
