@@ -2,6 +2,7 @@ package openai
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -84,6 +85,9 @@ func (a *GeminiAdapter) CreateCompletion(req model.OpenAICompletionRequest) (mod
 	}
 	if req.Stream {
 		return model.OpenAICompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "stream_not_supported", Message: "stream=true is not supported"}
+	}
+	if req.N > 1 {
+		return model.OpenAICompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "n_not_supported", Message: "n>1 is not supported"}
 	}
 
 	prompt, err := normalizePrompt(req.Prompt)
@@ -178,16 +182,25 @@ func convertGeminiError(err error, status *model.GeminiStatus) error {
 		if status.Code != "" {
 			errCode = strings.ToLower(status.Code)
 		}
-		if httpStatus >= 400 && httpStatus < 500 {
+		if httpStatus == 429 {
+			errType = "rate_limit_error"
+		} else if httpStatus >= 400 && httpStatus < 500 {
 			errType = "invalid_request_error"
 		}
+	}
+
+	log.Printf("openai adapter upstream error: status=%d type=%s code=%s err=%v", httpStatus, errType, errCode, err)
+
+	message := "Upstream processing error"
+	if httpStatus >= 500 {
+		message = "An internal service error occurred"
 	}
 
 	return &APIError{
 		HTTPStatus: httpStatus,
 		Type:       errType,
 		Code:       errCode,
-		Message:    err.Error(),
+		Message:    message,
 	}
 }
 

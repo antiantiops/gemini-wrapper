@@ -1,4 +1,4 @@
-package main
+package gemini
 
 import (
 	"gemini-wrapper/service/gemini/gemini_impl"

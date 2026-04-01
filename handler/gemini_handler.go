@@ -4,6 +4,7 @@ import (
 	"gemini-wrapper/model"
 	"gemini-wrapper/service/gemini/gemini_impl"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 )
@@ -27,6 +28,7 @@ func (g *GeminiHandler) HandleAsk(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, model.AskResponse{Error: "Invalid request format"})
 	}
 
+	req.Question = strings.TrimSpace(req.Question)
 	if req.Question == "" {
 		return c.JSON(http.StatusBadRequest, model.AskResponse{Error: "Question is required"})
 	}
@@ -71,7 +73,7 @@ func (g *GeminiHandler) HandleGeminiAPI(c echo.Context) error {
 		})
 	}
 
-	question := req.Contents[0].Parts[0].Text
+	question := strings.TrimSpace(req.Contents[0].Parts[0].Text)
 	if question == "" {
 		return c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"error": map[string]interface{}{
@@ -80,6 +82,7 @@ func (g *GeminiHandler) HandleGeminiAPI(c echo.Context) error {
 			},
 		})
 	}
+	req.Contents[0].Parts[0].Text = question
 
 	answer, status, err := g.service.Ask(question, modelName)
 	if err != nil {

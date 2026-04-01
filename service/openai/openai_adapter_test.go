@@ -51,3 +51,45 @@ func TestCreateCompletionError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestCreateChatCompletionRejectsNMoreThanOne(t *testing.T) {
+	svc := &fakeGeminiService{answer: "hello"}
+	adapter := NewGeminiAdapter(svc)
+
+	_, err := adapter.CreateChatCompletion(model.OpenAIChatCompletionRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []model.OpenAIChatMessage{
+			{Role: "user", Content: "say hi"},
+		},
+		N: 2,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.HTTPStatus != 400 || apiErr.Type != "invalid_request_error" || apiErr.Code != "n_not_supported" {
+		t.Fatalf("unexpected api error: %#v", apiErr)
+	}
+}
+
+func TestCreateCompletionRejectsNMoreThanOne(t *testing.T) {
+	svc := &fakeGeminiService{answer: "hello"}
+	adapter := NewGeminiAdapter(svc)
+
+	_, err := adapter.CreateCompletion(model.OpenAICompletionRequest{Prompt: "test", N: 2})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.HTTPStatus != 400 || apiErr.Type != "invalid_request_error" || apiErr.Code != "n_not_supported" {
+		t.Fatalf("unexpected api error: %#v", apiErr)
+	}
+}
