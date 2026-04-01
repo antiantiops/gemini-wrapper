@@ -1,8 +1,9 @@
-package main
+package gemini_impl
 
 import (
 	"encoding/json"
 	"fmt"
+	"gemini-wrapper/model"
 	"net/http"
 	"os"
 	"os/exec"
@@ -31,19 +32,13 @@ type GeminiResponse struct {
 	} `json:"error,omitempty"`
 }
 
-type GeminiStatus struct {
-	HTTPStatus int    `json:"httpStatus"`
-	Code       string `json:"code,omitempty"`
-	Message    string `json:"message,omitempty"`
-}
-
 func NewGeminiService() *GeminiService {
 	fmt.Println("Gemini service initialized (using headless mode)")
 	return &GeminiService{}
 }
 
 // Ask sends a question to Gemini CLI using headless mode and returns the response
-func (s *GeminiService) Ask(question string, model string) (string, *GeminiStatus, error) {
+func (s *GeminiService) Ask(question string, model string) (string, *model.GeminiStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -140,7 +135,7 @@ func (s *GeminiService) Ask(question string, model string) (string, *GeminiStatu
 }
 
 // AskWithEnv sends a question with custom environment variables
-func (s *GeminiService) AskWithEnv(question string, model string, envVars map[string]string) (string, *GeminiStatus, error) {
+func (s *GeminiService) AskWithEnv(question string, model string, _ map[string]string) (string, *model.GeminiStatus, error) {
 	// For headless mode, we don't need to modify process env vars
 	// Just pass them directly to the command
 	return s.Ask(question, model)
@@ -161,9 +156,9 @@ func parseGeminiOutput(outputStr string) (GeminiResponse, bool) {
 	return response, true
 }
 
-func detectUpstreamStatus(outputStr string, response *GeminiResponse) *GeminiStatus {
+func detectUpstreamStatus(outputStr string, response *GeminiResponse) *model.GeminiStatus {
 	if response != nil && response.Error != nil && response.Error.Code != 0 {
-		status := &GeminiStatus{HTTPStatus: response.Error.Code, Message: response.Error.Message}
+		status := &model.GeminiStatus{HTTPStatus: response.Error.Code, Message: response.Error.Message}
 		if response.Error.Type != "" {
 			status.Code = response.Error.Type
 		}
@@ -175,7 +170,7 @@ func detectUpstreamStatus(outputStr string, response *GeminiResponse) *GeminiSta
 		strings.Contains(outputStr, "Too Many Requests") ||
 		strings.Contains(outputStr, "rateLimitExceeded") ||
 		strings.Contains(outputStr, "RESOURCE_EXHAUSTED") {
-		return &GeminiStatus{
+		return &model.GeminiStatus{
 			HTTPStatus: http.StatusTooManyRequests,
 			Code:       "RESOURCE_EXHAUSTED",
 			Message:    "Upstream rate limited or model capacity exhausted",

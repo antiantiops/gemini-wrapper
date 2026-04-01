@@ -1,0 +1,200 @@
+package openai
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"gemini-wrapper/model"
+	"gemini-wrapper/service/gemini"
+)
+
+type GeminiAdapter struct {
+	geminiService gemini.GeminiService
+}
+
+func NewGeminiAdapter(geminiService gemini.GeminiService) *GeminiAdapter {
+	return &GeminiAdapter{geminiService: geminiService}
+}
+
+func (a *GeminiAdapter) ListModels() model.OpenAIModelListResponse {
+	now := time.Now().Unix()
+	return model.OpenAIModelListResponse{
+		Object: "list",
+		Data: []model.OpenAIModel{
+			{ID: "gemini-2.5-flash", Object: "model", Created: now, OwnedBy: "google"},
+			{ID: "gemini-2.5-flash-lite", Object: "model", Created: now, OwnedBy: "google"},
+			{ID: "gemini-2.5-pro", Object: "model", Created: now, OwnedBy: "google"},
+		},
+	}
+}
+
+func (a *GeminiAdapter) CreateChatCompletion(req model.OpenAIChatCompletionRequest) (model.OpenAIChatCompletionResponse, error) {
+	if a.geminiService == nil {
+		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "Gemini backend is not initialized"}
+	}
+	if len(req.Messages) == 0 {
+		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "messages_required", Message: "messages is required"}
+	}
+	if req.Stream {
+		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "stream_not_supported", Message: "stream=true is not supported"}
+	}
+
+	modelName := req.Model
+	if modelName == "" {
+		modelName = "gemini-2.5-flash"
+	}
+
+	prompt := buildPromptFromMessages(req.Messages)
+	answer, status, err := a.geminiService.Ask(prompt, modelName)
+	if err != nil {
+		return model.OpenAIChatCompletionResponse{}, convertGeminiError(err, status)
+	}
+
+	now := time.Now().Unix()
+	promptTokens := estimateTokens(prompt)
+	completionTokens := estimateTokens(answer)
+
+	return model.OpenAIChatCompletionResponse{
+		ID:      fmt.Sprintf("chatcmpl-%d", now),
+		Object:  "chat.completion",
+		Created: now,
+		Model:   modelName,
+		Choices: []model.OpenAIChatCompletionChoice{
+			{
+				Index: 0,
+				Message: model.OpenAIChatMessage{
+					Role:    "assistant",
+					Content: answer,
+				},
+				FinishReason: "stop",
+			},
+		},
+		Usage: model.OpenAIUsage{
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+			TotalTokens:      promptTokens + completionTokens,
+		},
+	}, nil
+}
+
+func (a *GeminiAdapter) CreateCompletion(req model.OpenAICompletionRequest) (model.OpenAICompletionResponse, error) {
+	if a.geminiService == nil {
+		return model.OpenAICompletionResponse{}, &APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "Gemini backend is not initialized"}
+	}
+	if req.Stream {
+		return model.OpenAICompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "stream_not_supported", Message: "stream=true is not supported"}
+	}
+
+	prompt, err := normalizePrompt(req.Prompt)
+	if err != nil {
+		return model.OpenAICompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "prompt_invalid", Message: err.Error()}
+	}
+
+	modelName := req.Model
+	if modelName == "" {
+		modelName = "gemini-2.5-flash"
+	}
+
+	answer, status, askErr := a.geminiService.Ask(prompt, modelName)
+	if askErr != nil {
+		return model.OpenAICompletionResponse{}, convertGeminiError(askErr, status)
+	}
+
+	now := time.Now().Unix()
+	promptTokens := estimateTokens(prompt)
+	completionTokens := estimateTokens(answer)
+
+	return model.OpenAICompletionResponse{
+		ID:      fmt.Sprintf("cmpl-%d", now),
+		Object:  "text_completion",
+		Created: now,
+		Model:   modelName,
+		Choices: []model.OpenAICompletionChoice{
+			{
+				Text:         answer,
+				Index:        0,
+				Logprobs:     nil,
+				FinishReason: "stop",
+			},
+		},
+		Usage: model.OpenAIUsage{
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+			TotalTokens:      promptTokens + completionTokens,
+		},
+	}, nil
+}
+
+func buildPromptFromMessages(messages []model.OpenAIChatMessage) string {
+	parts := make([]string, 0, len(messages))
+	for _, m := range messages {
+		role := strings.TrimSpace(m.Role)
+		if role == "" {
+			role = "user"
+		}
+		parts = append(parts, fmt.Sprintf("%s: %s", role, strings.TrimSpace(m.Content)))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func normalizePrompt(raw interface{}) (string, error) {
+	switch v := raw.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return "", fmt.Errorf("prompt is required")
+		}
+		return v, nil
+	case []interface{}:
+		if len(v) == 0 {
+			return "", fmt.Errorf("prompt is required")
+		}
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return "", fmt.Errorf("prompt array must contain only strings")
+			}
+			parts = append(parts, s)
+		}
+		return strings.Join(parts, "\n"), nil
+	default:
+		return "", fmt.Errorf("prompt must be a string or array of strings")
+	}
+}
+
+func convertGeminiError(err error, status *model.GeminiStatus) error {
+	if err == nil {
+		return nil
+	}
+
+	httpStatus := 500
+	errType := "server_error"
+	errCode := "gemini_error"
+	if status != nil {
+		if status.HTTPStatus > 0 {
+			httpStatus = status.HTTPStatus
+		}
+		if status.Code != "" {
+			errCode = strings.ToLower(status.Code)
+		}
+		if httpStatus >= 400 && httpStatus < 500 {
+			errType = "invalid_request_error"
+		}
+	}
+
+	return &APIError{
+		HTTPStatus: httpStatus,
+		Type:       errType,
+		Code:       errCode,
+		Message:    err.Error(),
+	}
+}
+
+func estimateTokens(text string) int {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return 0
+	}
+	return (len([]rune(trimmed)) + 3) / 4
+}
