@@ -36,8 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Gemini CLI (has native dependencies that need compilation)
 RUN npm install -g @google/gemini-cli@0.36.0 && \
-    gemini --version && \
-    echo "✓ Gemini CLI installed successfully"
+  npm list -g --depth=0 @google/gemini-cli && \
+  echo "✓ Gemini CLI installed successfully"
 
 # Set up working directory
 WORKDIR /app
