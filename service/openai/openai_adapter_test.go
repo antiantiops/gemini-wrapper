@@ -76,6 +76,30 @@ func TestCreateChatCompletionRejectsNMoreThanOne(t *testing.T) {
 	}
 }
 
+func TestCreateChatCompletionRejectsNNegative(t *testing.T) {
+	svc := &fakeGeminiService{answer: "hello"}
+	adapter := NewGeminiAdapter(svc)
+
+	_, err := adapter.CreateChatCompletion(model.OpenAIChatCompletionRequest{
+		Model: "gemini-2.5-flash",
+		Messages: []model.OpenAIChatMessage{
+			{Role: "user", Content: "say hi"},
+		},
+		N: -1,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.HTTPStatus != 400 || apiErr.Type != "invalid_request_error" || apiErr.Code != "n_not_supported" || apiErr.Message != "n<0 is not supported" {
+		t.Fatalf("unexpected api error: %#v", apiErr)
+	}
+}
+
 func TestCreateCompletionRejectsNMoreThanOne(t *testing.T) {
 	svc := &fakeGeminiService{answer: "hello"}
 	adapter := NewGeminiAdapter(svc)
@@ -90,6 +114,24 @@ func TestCreateCompletionRejectsNMoreThanOne(t *testing.T) {
 		t.Fatalf("expected APIError, got %T", err)
 	}
 	if apiErr.HTTPStatus != 400 || apiErr.Type != "invalid_request_error" || apiErr.Code != "n_not_supported" {
+		t.Fatalf("unexpected api error: %#v", apiErr)
+	}
+}
+
+func TestCreateCompletionRejectsNNegative(t *testing.T) {
+	svc := &fakeGeminiService{answer: "hello"}
+	adapter := NewGeminiAdapter(svc)
+
+	_, err := adapter.CreateCompletion(model.OpenAICompletionRequest{Prompt: "test", N: -1})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.HTTPStatus != 400 || apiErr.Type != "invalid_request_error" || apiErr.Code != "n_not_supported" || apiErr.Message != "n<0 is not supported" {
 		t.Fatalf("unexpected api error: %#v", apiErr)
 	}
 }
@@ -112,6 +154,24 @@ func TestCreateResponseRejectsInvalidInput(t *testing.T) {
 	adapter := NewGeminiAdapter(svc)
 
 	_, err := adapter.CreateResponse(model.OpenAIResponseRequest{Input: []interface{}{123}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.HTTPStatus != 400 || apiErr.Type != "invalid_request_error" || apiErr.Code != "input_invalid" {
+		t.Fatalf("unexpected api error: %#v", apiErr)
+	}
+}
+
+func TestCreateResponseRejectsObjectItemWithoutContentOrText(t *testing.T) {
+	svc := &fakeGeminiService{answer: "hello"}
+	adapter := NewGeminiAdapter(svc)
+
+	_, err := adapter.CreateResponse(model.OpenAIResponseRequest{Input: []interface{}{map[string]interface{}{"foo": "bar"}}})
 	if err == nil {
 		t.Fatal("expected error")
 	}

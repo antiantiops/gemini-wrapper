@@ -40,6 +40,9 @@ func (a *GeminiAdapter) CreateChatCompletion(req model.OpenAIChatCompletionReque
 	if req.Stream {
 		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "stream_not_supported", Message: "stream=true is not supported"}
 	}
+	if req.N < 0 {
+		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "n_not_supported", Message: "n<0 is not supported"}
+	}
 	if req.N > 1 {
 		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "n_not_supported", Message: "n>1 is not supported"}
 	}
@@ -88,6 +91,9 @@ func (a *GeminiAdapter) CreateCompletion(req model.OpenAICompletionRequest) (mod
 	}
 	if req.Stream {
 		return model.OpenAICompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "stream_not_supported", Message: "stream=true is not supported"}
+	}
+	if req.N < 0 {
+		return model.OpenAICompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "n_not_supported", Message: "n<0 is not supported"}
 	}
 	if req.N > 1 {
 		return model.OpenAICompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "n_not_supported", Message: "n>1 is not supported"}
@@ -157,11 +163,12 @@ func (a *GeminiAdapter) CreateResponse(req model.OpenAIResponseRequest) (model.O
 	}
 
 	now := time.Now().Unix()
+	responseID := fmt.Sprintf("resp-%d", time.Now().UnixNano())
 	promptTokens := estimateTokens(prompt)
 	completionTokens := estimateTokens(answer)
 
 	return model.OpenAIResponse{
-		ID:        fmt.Sprintf("resp-%d", now),
+		ID:        responseID,
 		Object:    "response",
 		CreatedAt: now,
 		Status:    "completed",
@@ -267,7 +274,7 @@ func normalizeResponseInputItem(item interface{}) (string, error) {
 		if text, ok := t["text"].(string); ok {
 			return strings.TrimSpace(text), nil
 		}
-		return "", nil
+		return "", fmt.Errorf("input object item must contain content or text")
 	default:
 		return "", fmt.Errorf("input array contains unsupported item type")
 	}
