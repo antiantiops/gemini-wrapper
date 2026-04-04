@@ -286,16 +286,25 @@ func normalizeResponseInputContent(content interface{}) (string, error) {
 		return strings.TrimSpace(c), nil
 	case []interface{}:
 		parts := make([]string, 0, len(c))
-		for _, p := range c {
+		for i, p := range c {
 			switch v := p.(type) {
 			case string:
-				if strings.TrimSpace(v) != "" {
-					parts = append(parts, strings.TrimSpace(v))
+				trimmed := strings.TrimSpace(v)
+				if trimmed != "" {
+					parts = append(parts, trimmed)
 				}
 			case map[string]interface{}:
-				if text, ok := v["text"].(string); ok && strings.TrimSpace(text) != "" {
-					parts = append(parts, strings.TrimSpace(text))
+				rawText, ok := v["text"]
+				if !ok {
+					return "", fmt.Errorf("input content[%d] object must contain non-empty text", i)
 				}
+				text, ok := rawText.(string)
+				if !ok || strings.TrimSpace(text) == "" {
+					return "", fmt.Errorf("input content[%d] object must contain non-empty text", i)
+				}
+				parts = append(parts, strings.TrimSpace(text))
+			default:
+				return "", fmt.Errorf("input content[%d] has unsupported type %T", i, p)
 			}
 		}
 		return strings.Join(parts, "\n"), nil

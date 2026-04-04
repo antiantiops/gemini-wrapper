@@ -2,6 +2,7 @@ package openai
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"gemini-wrapper/model"
@@ -182,5 +183,55 @@ func TestCreateResponseRejectsObjectItemWithoutContentOrText(t *testing.T) {
 	}
 	if apiErr.HTTPStatus != 400 || apiErr.Type != "invalid_request_error" || apiErr.Code != "input_invalid" {
 		t.Fatalf("unexpected api error: %#v", apiErr)
+	}
+}
+
+func TestCreateResponseRejectsContentArrayUnsupportedElementType(t *testing.T) {
+	svc := &fakeGeminiService{answer: "hello"}
+	adapter := NewGeminiAdapter(svc)
+
+	_, err := adapter.CreateResponse(model.OpenAIResponseRequest{Input: []interface{}{
+		map[string]interface{}{
+			"content": []interface{}{"ok", 123},
+		},
+	}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.HTTPStatus != 400 || apiErr.Type != "invalid_request_error" || apiErr.Code != "input_invalid" {
+		t.Fatalf("unexpected api error: %#v", apiErr)
+	}
+	if !strings.Contains(apiErr.Message, "input content[1]") {
+		t.Fatalf("expected indexed content error, got: %q", apiErr.Message)
+	}
+}
+
+func TestCreateResponseRejectsContentArrayMapWithoutNonEmptyText(t *testing.T) {
+	svc := &fakeGeminiService{answer: "hello"}
+	adapter := NewGeminiAdapter(svc)
+
+	_, err := adapter.CreateResponse(model.OpenAIResponseRequest{Input: []interface{}{
+		map[string]interface{}{
+			"content": []interface{}{map[string]interface{}{"foo": "bar"}},
+		},
+	}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.HTTPStatus != 400 || apiErr.Type != "invalid_request_error" || apiErr.Code != "input_invalid" {
+		t.Fatalf("unexpected api error: %#v", apiErr)
+	}
+	if !strings.Contains(apiErr.Message, "input content[0]") {
+		t.Fatalf("expected indexed content error, got: %q", apiErr.Message)
 	}
 }
