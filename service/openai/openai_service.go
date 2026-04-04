@@ -6,6 +6,7 @@ type Service interface {
 	ListModels() model.OpenAIModelListResponse
 	CreateChatCompletion(req model.OpenAIChatCompletionRequest) (model.OpenAIChatCompletionResponse, error)
 	CreateCompletion(req model.OpenAICompletionRequest) (model.OpenAICompletionResponse, error)
+	CreateResponse(req model.OpenAIResponseRequest) (model.OpenAIResponse, error)
 }
 
 type APIError struct {

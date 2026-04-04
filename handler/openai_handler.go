@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"gemini-wrapper/model"
@@ -56,6 +58,66 @@ func (h *OpenAIHandler) CreateCompletion(c echo.Context) error {
 		return writeOpenAIError(c, err)
 	}
 	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *OpenAIHandler) CreateResponse(c echo.Context) error {
+	if h == nil || h.service == nil {
+		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "OpenAI adapter is not initialized"})
+	}
+
+	var req model.OpenAIResponseRequest
+	if err := c.Bind(&req); err != nil {
+		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "invalid_json", Message: "Invalid JSON body"})
+	}
+
+	resp, err := h.service.CreateResponse(req)
+	if err != nil {
+		return writeOpenAIError(c, err)
+	}
+
+	if req.Stream {
+		return writeResponseSSE(c, resp)
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+func writeResponseSSE(c echo.Context, resp model.OpenAIResponse) error {
+	r := c.Response()
+	r.Header().Set(echo.HeaderContentType, "text/event-stream")
+	r.Header().Set("Cache-Control", "no-cache")
+	r.Header().Set("Connection", "keep-alive")
+	r.WriteHeader(http.StatusOK)
+
+	writeEvent := func(event string, payload interface{}) error {
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(r, "event: %s\ndata: %s\n\n", event, string(body)); err != nil {
+			return err
+		}
+		r.Flush()
+		return nil
+	}
+
+	if err := writeEvent("response.created", map[string]interface{}{"type": "response.created", "response": resp}); err != nil {
+		return err
+	}
+	if resp.OutputText != "" {
+		if err := writeEvent("response.output_text.delta", map[string]interface{}{"type": "response.output_text.delta", "delta": resp.OutputText}); err != nil {
+			return err
+		}
+		if err := writeEvent("response.output_text.done", map[string]interface{}{"type": "response.output_text.done", "text": resp.OutputText}); err != nil {
+			return err
+		}
+	}
+	if err := writeEvent("response.completed", map[string]interface{}{"type": "response.completed", "response": resp}); err != nil {
+		return err
+	}
+
+	_, err := fmt.Fprint(r, "data: [DONE]\n\n")
+	r.Flush()
+	return err
 }
 
 func writeOpenAIError(c echo.Context, err error) error {

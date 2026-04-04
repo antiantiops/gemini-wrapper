@@ -93,3 +93,34 @@ func TestCreateCompletionRejectsNMoreThanOne(t *testing.T) {
 		t.Fatalf("unexpected api error: %#v", apiErr)
 	}
 }
+
+func TestCreateResponseSuccess(t *testing.T) {
+	svc := &fakeGeminiService{answer: "hello"}
+	adapter := NewGeminiAdapter(svc)
+
+	resp, err := adapter.CreateResponse(model.OpenAIResponseRequest{Model: "gemini-2.5-flash", Input: "say hi"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Object != "response" || resp.OutputText != "hello" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestCreateResponseRejectsInvalidInput(t *testing.T) {
+	svc := &fakeGeminiService{answer: "hello"}
+	adapter := NewGeminiAdapter(svc)
+
+	_, err := adapter.CreateResponse(model.OpenAIResponseRequest{Input: []interface{}{123}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected APIError, got %T", err)
+	}
+	if apiErr.HTTPStatus != 400 || apiErr.Type != "invalid_request_error" || apiErr.Code != "input_invalid" {
+		t.Fatalf("unexpected api error: %#v", apiErr)
+	}
+}

@@ -40,6 +40,9 @@ func (a *GeminiAdapter) CreateChatCompletion(req model.OpenAIChatCompletionReque
 	if req.Stream {
 		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "stream_not_supported", Message: "stream=true is not supported"}
 	}
+	if req.N > 1 {
+		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "n_not_supported", Message: "n>1 is not supported"}
+	}
 
 	modelName := req.Model
 	if modelName == "" {
@@ -130,6 +133,57 @@ func (a *GeminiAdapter) CreateCompletion(req model.OpenAICompletionRequest) (mod
 	}, nil
 }
 
+func (a *GeminiAdapter) CreateResponse(req model.OpenAIResponseRequest) (model.OpenAIResponse, error) {
+	if a.geminiService == nil {
+		return model.OpenAIResponse{}, &APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "Gemini backend is not initialized"}
+	}
+
+	prompt, err := normalizeResponseInput(req.Input)
+	if err != nil {
+		return model.OpenAIResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "input_invalid", Message: err.Error()}
+	}
+	if strings.TrimSpace(req.Instructions) != "" {
+		prompt = strings.TrimSpace(req.Instructions) + "\n\n" + prompt
+	}
+
+	modelName := req.Model
+	if modelName == "" {
+		modelName = "gemini-2.5-flash"
+	}
+
+	answer, status, askErr := a.geminiService.Ask(prompt, modelName)
+	if askErr != nil {
+		return model.OpenAIResponse{}, convertGeminiError(askErr, status)
+	}
+
+	now := time.Now().Unix()
+	promptTokens := estimateTokens(prompt)
+	completionTokens := estimateTokens(answer)
+
+	return model.OpenAIResponse{
+		ID:        fmt.Sprintf("resp-%d", now),
+		Object:    "response",
+		CreatedAt: now,
+		Status:    "completed",
+		Model:     modelName,
+		Output: []model.OpenAIResponseOutput{
+			{
+				Type: "message",
+				Role: "assistant",
+				Content: []model.OpenAIResponseContent{
+					{Type: "output_text", Text: answer},
+				},
+			},
+		},
+		OutputText: answer,
+		Usage: model.OpenAIUsage{
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+			TotalTokens:      promptTokens + completionTokens,
+		},
+	}, nil
+}
+
 func buildPromptFromMessages(messages []model.OpenAIChatMessage) string {
 	parts := make([]string, 0, len(messages))
 	for _, m := range messages {
@@ -164,6 +218,82 @@ func normalizePrompt(raw interface{}) (string, error) {
 		return strings.Join(parts, "\n"), nil
 	default:
 		return "", fmt.Errorf("prompt must be a string or array of strings")
+	}
+}
+
+func normalizeResponseInput(raw interface{}) (string, error) {
+	switch v := raw.(type) {
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return "", fmt.Errorf("input is required")
+		}
+		return trimmed, nil
+	case []interface{}:
+		if len(v) == 0 {
+			return "", fmt.Errorf("input is required")
+		}
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			s, err := normalizeResponseInputItem(item)
+			if err != nil {
+				return "", err
+			}
+			if s != "" {
+				parts = append(parts, s)
+			}
+		}
+		if len(parts) == 0 {
+			return "", fmt.Errorf("input is required")
+		}
+		return strings.Join(parts, "\n"), nil
+	default:
+		return "", fmt.Errorf("input must be a string or array")
+	}
+}
+
+func normalizeResponseInputItem(item interface{}) (string, error) {
+	switch t := item.(type) {
+	case string:
+		return strings.TrimSpace(t), nil
+	case map[string]interface{}:
+		if content, ok := t["content"]; ok {
+			s, err := normalizeResponseInputContent(content)
+			if err != nil {
+				return "", err
+			}
+			return s, nil
+		}
+		if text, ok := t["text"].(string); ok {
+			return strings.TrimSpace(text), nil
+		}
+		return "", nil
+	default:
+		return "", fmt.Errorf("input array contains unsupported item type")
+	}
+}
+
+func normalizeResponseInputContent(content interface{}) (string, error) {
+	switch c := content.(type) {
+	case string:
+		return strings.TrimSpace(c), nil
+	case []interface{}:
+		parts := make([]string, 0, len(c))
+		for _, p := range c {
+			switch v := p.(type) {
+			case string:
+				if strings.TrimSpace(v) != "" {
+					parts = append(parts, strings.TrimSpace(v))
+				}
+			case map[string]interface{}:
+				if text, ok := v["text"].(string); ok && strings.TrimSpace(text) != "" {
+					parts = append(parts, strings.TrimSpace(text))
+				}
+			}
+		}
+		return strings.Join(parts, "\n"), nil
+	default:
+		return "", fmt.Errorf("input content has unsupported type")
 	}
 }
 

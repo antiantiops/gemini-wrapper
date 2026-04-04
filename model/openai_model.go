@@ -90,3 +90,33 @@ type OpenAICompletionResponse struct {
 	Choices []OpenAICompletionChoice `json:"choices"`
 	Usage   OpenAIUsage              `json:"usage"`
 }
+
+type OpenAIResponseRequest struct {
+	Model        string      `json:"model"`
+	Input        interface{} `json:"input"`
+	Instructions string      `json:"instructions,omitempty"`
+	Stream       bool        `json:"stream,omitempty"`
+}
+
+type OpenAIResponseContent struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+type OpenAIResponseOutput struct {
+	ID      string                  `json:"id,omitempty"`
+	Type    string                  `json:"type"`
+	Role    string                  `json:"role,omitempty"`
+	Content []OpenAIResponseContent `json:"content,omitempty"`
+}
+
+type OpenAIResponse struct {
+	ID         string                 `json:"id"`
+	Object     string                 `json:"object"`
+	CreatedAt  int64                  `json:"created_at"`
+	Status     string                 `json:"status"`
+	Model      string                 `json:"model"`
+	Output     []OpenAIResponseOutput `json:"output"`
+	OutputText string                 `json:"output_text,omitempty"`
+	Usage      OpenAIUsage            `json:"usage"`
+}
