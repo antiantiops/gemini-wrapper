@@ -110,6 +110,7 @@ docker exec -it gemini-wrapper sh -c 'gemini'
 mkdir -p ~/.gemini
 
 # Start container with mount
+# Add: -e OPENAI_API_KEY=sk-local-demo (optional, enables Bearer auth for /v1/*)
 docker run -d -p 8080:8080 \
   -v ~/.gemini:/app/.gemini \
   --name gemini-wrapper \
@@ -122,6 +123,7 @@ docker run -d -p 8080:8080 \
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini"
 
 # Start container with mount
+# Add: -e OPENAI_API_KEY=sk-local-demo (optional, enables Bearer auth for /v1/*)
 docker run -d -p 8080:8080 `
   -v ${env:USERPROFILE}\.gemini:/app/.gemini `
   --name gemini-wrapper `
@@ -309,11 +311,46 @@ This backend exposes OpenAI-compatible endpoints and forwards generation traffic
 - `POST /v1/chat/completions`
 - `POST /v1/completions`
 
-Example request:
+### OpenAI-Compatible Authentication (OPENAI_API_KEY)
+
+Authentication behavior for `/v1/*` depends on container environment:
+
+- If `OPENAI_API_KEY` is **not set**: Bearer token is optional.
+- If `OPENAI_API_KEY` **is set**: requests must send `Authorization: Bearer <OPENAI_API_KEY>`.
+
+Run container with OpenAI-compatible API key enabled:
 
 ```bash
+docker rm -f gemini-wrapper
+docker run -d -p 8080:8080 \
+  -v ~/.gemini:/app/.gemini \
+  -e OPENAI_API_KEY=sk-local-demo \
+  --name gemini-wrapper \
+  antiantiops/gemini-wrapper:latest
+```
+
+Windows (PowerShell):
+
+```powershell
+docker rm -f gemini-wrapper
+docker run -d -p 8080:8080 `
+  -v ${env:USERPROFILE}\.gemini:/app/.gemini `
+  -e OPENAI_API_KEY=sk-local-demo `
+  --name gemini-wrapper `
+  antiantiops/gemini-wrapper:latest
+```
+
+Check OpenAI-compatible endpoints:
+
+```bash
+# 1) List models (with Bearer token when OPENAI_API_KEY is set)
+curl http://localhost:8080/v1/models \
+  -H "Authorization: Bearer sk-local-demo"
+
+# 2) Chat completion
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-local-demo" \
   -d '{
     "model": "gemini-2.5-flash",
     "messages": [
@@ -321,6 +358,8 @@ curl -X POST http://localhost:8080/v1/chat/completions \
     ]
   }'
 ```
+
+If `OPENAI_API_KEY` is not set, you can remove the `Authorization` header.
 
 ---
 
@@ -602,8 +641,9 @@ This project is open source and available under the MIT License.
 1. **✅ DO NOT install Gemini CLI on your computer** - It's already in the container
 2. **✅ Authenticate INSIDE the container** - Use `docker exec` command
 3. **✅ Always select "1. Login with Google"** when you see the menu
-4. **❌ DO NOT use "2. Use Gemini API Key"** - This option will NOT work
-5. **❌ DO NOT use "3. Vertex AI"** - This is for enterprise Google Cloud only
+4. **❌ DO NOT use "2. Use Gemini API Key" in Gemini CLI** - This option will NOT work for this wrapper's Gemini CLI auth flow
+5. **ℹ️ OpenAI-compatible `/v1/*` auth is separate** - Set `OPENAI_API_KEY` in container if you want Bearer token protection for OpenAI-compatible endpoints
+6. **❌ DO NOT use "3. Vertex AI"** - This is for enterprise Google Cloud only
 
 ### Why This Approach?
 
