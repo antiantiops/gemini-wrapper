@@ -35,5 +35,6 @@ func (api *API) SetupRouter() {
 		v1.GET("/models", api.OpenAIHandler.ListModels)
 		v1.POST("/chat/completions", api.OpenAIHandler.CreateChatCompletion)
 		v1.POST("/completions", api.OpenAIHandler.CreateCompletion)
+		v1.POST("/responses", api.OpenAIHandler.CreateResponse)
 	}
 }
