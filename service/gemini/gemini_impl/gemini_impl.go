@@ -142,18 +142,78 @@ func (s *GeminiService) AskWithEnv(question string, model string, _ map[string]s
 }
 
 func parseGeminiOutput(outputStr string) (GeminiResponse, bool) {
-	jsonStr, ok := extractLastJSONObject(outputStr)
-	if !ok {
-		return GeminiResponse{}, false
+	candidates := buildParseCandidates(outputStr)
+	attemptErrors := make([]string, 0, len(candidates))
+
+	for _, candidate := range candidates {
+		response, err := tryParseGeminiResponse(candidate.payload)
+		if err == nil {
+			return response, true
+		}
+		attemptErrors = append(attemptErrors, fmt.Sprintf("%s: %v", candidate.name, err))
 	}
 
+	if len(attemptErrors) > 0 {
+		fmt.Printf("Warning: Failed to parse JSON response. attempts=%s\n", strings.Join(attemptErrors, " | "))
+	}
+	return GeminiResponse{}, false
+}
+
+type parseCandidate struct {
+	name    string
+	payload string
+}
+
+func buildParseCandidates(outputStr string) []parseCandidate {
+	trimmed := strings.TrimSpace(outputStr)
+	if trimmed == "" {
+		return nil
+	}
+
+	candidates := make([]parseCandidate, 0, 3)
+	seen := map[string]struct{}{}
+	add := func(name, payload string) {
+		payload = strings.TrimSpace(payload)
+		if payload == "" {
+			return
+		}
+		if _, ok := seen[payload]; ok {
+			return
+		}
+		seen[payload] = struct{}{}
+		candidates = append(candidates, parseCandidate{name: name, payload: payload})
+	}
+
+	add("full_output", trimmed)
+	if extracted, ok := extractLastJSONObject(trimmed); ok {
+		add("last_json_object", extracted)
+	}
+	if fenced, ok := extractFencedJSON(trimmed); ok {
+		add("fenced_json", fenced)
+	}
+
+	return candidates
+}
+
+func tryParseGeminiResponse(payload string) (GeminiResponse, error) {
 	var response GeminiResponse
-	if err := json.Unmarshal([]byte(jsonStr), &response); err != nil {
-		fmt.Printf("Warning: Failed to parse JSON response: %v\n", err)
-		return GeminiResponse{}, false
+	if err := json.Unmarshal([]byte(payload), &response); err == nil {
+		return response, nil
 	}
 
-	return response, true
+	var encoded string
+	if err := json.Unmarshal([]byte(payload), &encoded); err != nil {
+		return GeminiResponse{}, err
+	}
+
+	encoded = strings.TrimSpace(encoded)
+	if encoded == "" {
+		return GeminiResponse{}, fmt.Errorf("decoded payload is empty")
+	}
+	if err := json.Unmarshal([]byte(encoded), &response); err != nil {
+		return GeminiResponse{}, err
+	}
+	return response, nil
 }
 
 func detectUpstreamStatus(outputStr string, response *GeminiResponse) *model.GeminiStatus {
@@ -226,4 +286,43 @@ func extractLastJSONObject(outputStr string) (string, bool) {
 	}
 
 	return "", false
+}
+
+func extractFencedJSON(outputStr string) (string, bool) {
+	last := ""
+	for i := 0; i < len(outputStr); {
+		startRel := strings.Index(outputStr[i:], "```")
+		if startRel == -1 {
+			break
+		}
+		start := i + startRel
+
+		headerStart := start + 3
+		lineRel := strings.IndexByte(outputStr[headerStart:], '\n')
+		if lineRel == -1 {
+			break
+		}
+		lineEnd := headerStart + lineRel
+		language := strings.TrimSpace(outputStr[headerStart:lineEnd])
+
+		contentStart := lineEnd + 1
+		closeRel := strings.Index(outputStr[contentStart:], "```")
+		if closeRel == -1 {
+			break
+		}
+		contentEnd := contentStart + closeRel
+		content := strings.TrimSpace(outputStr[contentStart:contentEnd])
+
+		lowerLanguage := strings.ToLower(language)
+		if content != "" && (lowerLanguage == "json" || lowerLanguage == "" || strings.HasPrefix(lowerLanguage, "json ")) {
+			last = content
+		}
+
+		i = contentEnd + 3
+	}
+
+	if last == "" {
+		return "", false
+	}
+	return last, true
 }
