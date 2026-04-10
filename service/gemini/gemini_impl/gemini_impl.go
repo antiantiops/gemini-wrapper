@@ -63,6 +63,11 @@ func (s *GeminiService) Ask(question string, modelName string) (string, *model.G
 
 		answer, status, err := s.askOnce(question, attemptModel)
 		if err == nil {
+			if shouldFallbackAfterSuccess(status, i, len(attemptModels)) {
+				status = withStatusModel(status, attemptModel)
+				fmt.Printf("Successful attempt reported 429; trying fallback model next. model=%s\n", printableModel(attemptModel))
+				continue
+			}
 			if i > 0 {
 				status = withStatusModel(status, attemptModel)
 				fmt.Printf("Fallback success: using model %s\n", printableModel(attemptModel))
@@ -523,4 +528,11 @@ func extractFencedJSON(outputStr string) (string, bool) {
 		return "", false
 	}
 	return last, true
+}
+
+func shouldFallbackAfterSuccess(status *model.GeminiStatus, attemptIndex int, totalAttempts int) bool {
+	if status == nil || status.HTTPStatus != http.StatusTooManyRequests {
+		return false
+	}
+	return attemptIndex < totalAttempts-1
 }
