@@ -54,6 +54,10 @@ func (s *GeminiService) Ask(question string, modelName string) (string, *model.G
 		attemptModels = []string{""}
 	}
 
+	var preservedAnswer string
+	var preservedStatus *model.GeminiStatus
+	hasPreservedSuccess := false
+
 	for i, attemptModel := range attemptModels {
 		if i == 0 {
 			fmt.Printf("Processing question: %q (model: %s)\n", question, printableModel(attemptModel))
@@ -65,6 +69,9 @@ func (s *GeminiService) Ask(question string, modelName string) (string, *model.G
 		if err == nil {
 			if shouldFallbackAfterSuccess(status, i, len(attemptModels)) {
 				status = withStatusModel(status, attemptModel)
+				preservedAnswer = answer
+				preservedStatus = status
+				hasPreservedSuccess = true
 				fmt.Printf("Successful attempt reported 429; trying fallback model next. model=%s\n", printableModel(attemptModel))
 				continue
 			}
@@ -77,12 +84,18 @@ func (s *GeminiService) Ask(question string, modelName string) (string, *model.G
 
 		status = withStatusModel(status, attemptModel)
 		if i == len(attemptModels)-1 || !isRetryableModelError(err, status) {
+			if hasPreservedSuccess {
+				return preservedAnswer, preservedStatus, nil
+			}
 			return "", status, err
 		}
 
 		fmt.Printf("Primary model failed with retriable error; moving to fallback model. err=%v\n", err)
 	}
 
+	if hasPreservedSuccess {
+		return preservedAnswer, preservedStatus, nil
+	}
 	return "", nil, fmt.Errorf("failed to process request")
 }
 
