@@ -62,14 +62,15 @@ func (s *GeminiService) Ask(question string, modelName string) (string, *model.G
 		}
 
 		answer, status, err := s.askOnce(question, attemptModel)
-		status = withStatusModel(status, attemptModel)
 		if err == nil {
 			if i > 0 {
+				status = withStatusModel(status, attemptModel)
 				fmt.Printf("Fallback success: using model %s\n", printableModel(attemptModel))
 			}
 			return answer, status, nil
 		}
 
+		status = withStatusModel(status, attemptModel)
 		if i == len(attemptModels)-1 || !isRetryableModelError(err, status) {
 			return "", status, err
 		}
@@ -355,20 +356,75 @@ func detectUpstreamStatus(outputStr string, response *GeminiResponse) *model.Gem
 }
 
 func detectRateLimitStatus(outputStr string) *model.GeminiStatus {
+	lower := strings.ToLower(outputStr)
+
 	if strings.Contains(outputStr, "\"code\": 429") ||
+		strings.Contains(outputStr, "\"status\": 429") ||
 		strings.Contains(outputStr, "status 429") ||
+		strings.Contains(outputStr, "HTTP/1.1 429") ||
+		strings.Contains(outputStr, "HTTP/2 429") ||
 		strings.Contains(outputStr, "Too Many Requests") ||
 		strings.Contains(outputStr, "rateLimitExceeded") ||
-		strings.Contains(outputStr, "RESOURCE_EXHAUSTED") ||
-		strings.Contains(strings.ToLower(outputStr), "capacity") ||
-		strings.Contains(strings.ToLower(outputStr), "quota") {
+		strings.Contains(outputStr, "RESOURCE_EXHAUSTED") {
 		return &model.GeminiStatus{
 			HTTPStatus: http.StatusTooManyRequests,
 			Code:       "RESOURCE_EXHAUSTED",
 			Message:    "Upstream rate limited or model capacity exhausted",
 		}
 	}
+
+	// Require stronger contextual phrases to avoid classifying ordinary text as 429.
+	if strings.Contains(lower, "quota exceeded") ||
+		strings.Contains(lower, "exceeded quota") ||
+		strings.Contains(lower, "capacity exceeded") ||
+		strings.Contains(lower, "exceeded capacity") ||
+		strings.Contains(lower, "rate limit exceeded") {
+		return &model.GeminiStatus{
+			HTTPStatus: http.StatusTooManyRequests,
+			Code:       "RESOURCE_EXHAUSTED",
+			Message:    "Upstream rate limited or model capacity exhausted",
+		}
+	}
+
+	errorContext := strings.Contains(lower, "\"error\"") || strings.Contains(lower, "error:") || strings.Contains(lower, "\"headers\"")
+	if errorContext && hasAnyWord(lower, "quota", "capacity") && hasAnyWord(lower, "rate", "limit", "exceeded", "exhausted") {
+		return &model.GeminiStatus{
+			HTTPStatus: http.StatusTooManyRequests,
+			Code:       "RESOURCE_EXHAUSTED",
+			Message:    "Upstream rate limited or model capacity exhausted",
+		}
+	}
+
 	return nil
+}
+
+func hasAnyWord(input string, words ...string) bool {
+	if len(words) == 0 {
+		return false
+	}
+	set := map[string]struct{}{}
+	for _, token := range tokenizeLower(input) {
+		set[token] = struct{}{}
+	}
+	for _, w := range words {
+		if _, ok := set[strings.ToLower(strings.TrimSpace(w))]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func tokenizeLower(input string) []string {
+	normalized := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == ' ' {
+			return r
+		}
+		if r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return ' '
+	}, input)
+	return strings.Fields(normalized)
 }
 
 func parseHTTPStatusFromCode(code string) (int, bool) {
