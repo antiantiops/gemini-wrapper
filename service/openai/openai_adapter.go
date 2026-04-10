@@ -57,6 +57,10 @@ func (a *GeminiAdapter) CreateChatCompletion(req model.OpenAIChatCompletionReque
 	if err != nil {
 		return model.OpenAIChatCompletionResponse{}, convertGeminiError(err, status)
 	}
+	resolvedModel := modelName
+	if status != nil && strings.TrimSpace(status.Model) != "" {
+		resolvedModel = status.Model
+	}
 
 	now := time.Now().Unix()
 	promptTokens := estimateTokens(prompt)
@@ -66,7 +70,7 @@ func (a *GeminiAdapter) CreateChatCompletion(req model.OpenAIChatCompletionReque
 		ID:      fmt.Sprintf("chatcmpl-%d", now),
 		Object:  "chat.completion",
 		Created: now,
-		Model:   modelName,
+		Model:   resolvedModel,
 		Choices: []model.OpenAIChatCompletionChoice{
 			{
 				Index: 0,
@@ -113,6 +117,10 @@ func (a *GeminiAdapter) CreateCompletion(req model.OpenAICompletionRequest) (mod
 	if askErr != nil {
 		return model.OpenAICompletionResponse{}, convertGeminiError(askErr, status)
 	}
+	resolvedModel := modelName
+	if status != nil && strings.TrimSpace(status.Model) != "" {
+		resolvedModel = status.Model
+	}
 
 	now := time.Now().Unix()
 	promptTokens := estimateTokens(prompt)
@@ -122,7 +130,7 @@ func (a *GeminiAdapter) CreateCompletion(req model.OpenAICompletionRequest) (mod
 		ID:      fmt.Sprintf("cmpl-%d", now),
 		Object:  "text_completion",
 		Created: now,
-		Model:   modelName,
+		Model:   resolvedModel,
 		Choices: []model.OpenAICompletionChoice{
 			{
 				Text:         answer,
@@ -161,6 +169,10 @@ func (a *GeminiAdapter) CreateResponse(req model.OpenAIResponseRequest) (model.O
 	if askErr != nil {
 		return model.OpenAIResponse{}, convertGeminiError(askErr, status)
 	}
+	resolvedModel := modelName
+	if status != nil && strings.TrimSpace(status.Model) != "" {
+		resolvedModel = status.Model
+	}
 
 	now := time.Now().Unix()
 	responseID := fmt.Sprintf("resp-%d", time.Now().UnixNano())
@@ -172,7 +184,7 @@ func (a *GeminiAdapter) CreateResponse(req model.OpenAIResponseRequest) (model.O
 		Object:    "response",
 		CreatedAt: now,
 		Status:    "completed",
-		Model:     modelName,
+		Model:     resolvedModel,
 		Output: []model.OpenAIResponseOutput{
 			{
 				Type: "message",

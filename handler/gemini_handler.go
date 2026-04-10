@@ -94,8 +94,13 @@ func (g *GeminiHandler) HandleGeminiAPI(c echo.Context) error {
 		})
 	}
 
+	responseModel := modelName
+	if status != nil && strings.TrimSpace(status.Model) != "" {
+		responseModel = status.Model
+	}
+
 	response := model.GeminiAPIResponse{
-		Model:  modelName,
+		Model:  responseModel,
 		Status: status,
 		Candidates: []struct {
 			Content struct {

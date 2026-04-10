@@ -1,6 +1,9 @@
 package gemini_impl
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestParseGeminiOutputParsesLastJSONObject(t *testing.T) {
 	out := "log line\n{\"response\":\"hello\"}\n"
@@ -51,5 +54,30 @@ func TestExtractFencedJSONReturnsLastJSONFence(t *testing.T) {
 	}
 	if fenced != "{\"response\":\"last\"}" {
 		t.Fatalf("unexpected fenced JSON: %q", fenced)
+	}
+}
+
+func TestParseFallbackModelsBracketSyntax(t *testing.T) {
+	got := parseFallbackModels("[gemini-2.5-flash, gemini-3.1-lite-flash]")
+	want := []string{"gemini-2.5-flash", "gemini-3.1-lite-flash"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected fallback models: got=%v want=%v", got, want)
+	}
+}
+
+func TestParseFallbackModelsCommaSyntaxWithQuotesAndDedup(t *testing.T) {
+	got := parseFallbackModels(" 'gemini-2.5-flash' , \"gemini-2.5-flash\" , gemini-2.5-pro ")
+	want := []string{"gemini-2.5-flash", "gemini-2.5-pro"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected fallback models: got=%v want=%v", got, want)
+	}
+}
+
+func TestBuildAttemptModelsSkipsDuplicatePrimary(t *testing.T) {
+	svc := &GeminiService{fallbackModels: []string{"gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-pro"}}
+	got := svc.buildAttemptModels("gemini-2.5-flash")
+	want := []string{"gemini-2.5-flash", "gemini-2.5-pro"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected attempt models: got=%v want=%v", got, want)
 	}
 }
