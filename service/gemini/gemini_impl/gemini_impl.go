@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 )
 
 type GeminiService struct {
-	mu sync.Mutex
+	mu             sync.Mutex
+	fallbackModels []string
 }
 
 // GeminiResponse represents the JSON response from gemini CLI headless mode
@@ -33,17 +35,52 @@ type GeminiResponse struct {
 }
 
 func NewGeminiService() *GeminiService {
-	fmt.Println("Gemini service initialized (using headless mode)")
-	return &GeminiService{}
+	fallbackModels := parseFallbackModels(os.Getenv("FALLBACK_MODEL"))
+	if len(fallbackModels) == 0 {
+		fmt.Println("Gemini service initialized (using headless mode)")
+	} else {
+		fmt.Printf("Gemini service initialized (using headless mode, fallback models: %s)\n", strings.Join(fallbackModels, ", "))
+	}
+	return &GeminiService{fallbackModels: fallbackModels}
 }
 
-// Ask sends a question to Gemini CLI using headless mode and returns the response
-func (s *GeminiService) Ask(question string, model string) (string, *model.GeminiStatus, error) {
+// Ask sends a question to Gemini CLI using headless mode and returns the response.
+func (s *GeminiService) Ask(question string, modelName string) (string, *model.GeminiStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	fmt.Printf("Processing question: %q (model: %s)\n", question, model)
+	attemptModels := s.buildAttemptModels(modelName)
+	if len(attemptModels) == 0 {
+		attemptModels = []string{""}
+	}
 
+	for i, attemptModel := range attemptModels {
+		if i == 0 {
+			fmt.Printf("Processing question: %q (model: %s)\n", question, printableModel(attemptModel))
+		} else {
+			fmt.Printf("Retrying with fallback model (%d/%d): %s\n", i, len(attemptModels)-1, printableModel(attemptModel))
+		}
+
+		answer, status, err := s.askOnce(question, attemptModel)
+		status = withStatusModel(status, attemptModel)
+		if err == nil {
+			if i > 0 {
+				fmt.Printf("Fallback success: using model %s\n", printableModel(attemptModel))
+			}
+			return answer, status, nil
+		}
+
+		if i == len(attemptModels)-1 || !isRetryableModelError(err, status) {
+			return "", status, err
+		}
+
+		fmt.Printf("Primary model failed with retriable error; moving to fallback model. err=%v\n", err)
+	}
+
+	return "", nil, fmt.Errorf("failed to process request")
+}
+
+func (s *GeminiService) askOnce(question string, modelName string) (string, *model.GeminiStatus, error) {
 	// Prepare the command arguments
 	args := []string{
 		"--prompt", question,
@@ -51,8 +88,8 @@ func (s *GeminiService) Ask(question string, model string) (string, *model.Gemin
 	}
 
 	// Add model if specified
-	if model != "" {
-		args = append(args, "--model", model)
+	if modelName != "" {
+		args = append(args, "--model", modelName)
 	}
 
 	// Create command
@@ -72,7 +109,7 @@ func (s *GeminiService) Ask(question string, model string) (string, *model.Gemin
 	if err != nil {
 		// Provide helpful error messages for common issues
 		if strings.Contains(outputStr, "ModelNotFoundError") || strings.Contains(outputStr, "not found") {
-			return "", status, fmt.Errorf("model not found: the model '%s' doesn't exist or isn't available. Use 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro', or omit model for auto-selection", model)
+			return "", status, fmt.Errorf("model not found: the model '%s' doesn't exist or isn't available. Use 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro', or omit model for auto-selection", modelName)
 		}
 
 		if strings.Contains(outputStr, "authentication") || strings.Contains(outputStr, "auth") {
@@ -216,28 +253,133 @@ func tryParseGeminiResponse(payload string) (GeminiResponse, error) {
 	return response, nil
 }
 
+func parseFallbackModels(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
+		raw = strings.TrimSpace(raw[1 : len(raw)-1])
+	}
+
+	parts := strings.Split(raw, ",")
+	fallbacks := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, p := range parts {
+		candidate := strings.TrimSpace(p)
+		candidate = strings.Trim(candidate, "\"'")
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		fallbacks = append(fallbacks, candidate)
+	}
+	return fallbacks
+}
+
+func (s *GeminiService) buildAttemptModels(primary string) []string {
+	attempts := make([]string, 0, 1+len(s.fallbackModels))
+	attempts = append(attempts, strings.TrimSpace(primary))
+	seen := map[string]struct{}{attempts[0]: {}}
+	for _, fallback := range s.fallbackModels {
+		fallback = strings.TrimSpace(fallback)
+		if fallback == "" {
+			continue
+		}
+		if _, ok := seen[fallback]; ok {
+			continue
+		}
+		seen[fallback] = struct{}{}
+		attempts = append(attempts, fallback)
+	}
+	return attempts
+}
+
+func withStatusModel(status *model.GeminiStatus, modelName string) *model.GeminiStatus {
+	if strings.TrimSpace(modelName) == "" {
+		return status
+	}
+	if status == nil {
+		return &model.GeminiStatus{Model: modelName}
+	}
+	status.Model = modelName
+	return status
+}
+
+func printableModel(modelName string) string {
+	if strings.TrimSpace(modelName) == "" {
+		return "auto"
+	}
+	return modelName
+}
+
+func isRetryableModelError(err error, status *model.GeminiStatus) bool {
+	if status != nil && status.HTTPStatus == http.StatusTooManyRequests {
+		return true
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "rate limit") ||
+		strings.Contains(message, "ratelimit") ||
+		strings.Contains(message, "resource_exhausted") ||
+		strings.Contains(message, "capacity") ||
+		strings.Contains(message, "quota")
+}
+
 func detectUpstreamStatus(outputStr string, response *GeminiResponse) *model.GeminiStatus {
-	if response != nil && response.Error != nil && response.Error.Code != 0 {
-		status := &model.GeminiStatus{HTTPStatus: response.Error.Code, Message: response.Error.Message}
+	if inferred := detectRateLimitStatus(outputStr); inferred != nil {
+		return inferred
+	}
+
+	if response != nil && response.Error != nil {
+		status := &model.GeminiStatus{Message: response.Error.Message}
 		if response.Error.Type != "" {
 			status.Code = response.Error.Type
 		}
-		return status
+		if response.Error.Code >= 100 && response.Error.Code <= 599 {
+			status.HTTPStatus = response.Error.Code
+		} else if parsed, ok := parseHTTPStatusFromCode(response.Error.Type); ok {
+			status.HTTPStatus = parsed
+		}
+		if status.HTTPStatus != 0 || status.Code != "" || status.Message != "" {
+			return status
+		}
 	}
 
+	return nil
+}
+
+func detectRateLimitStatus(outputStr string) *model.GeminiStatus {
 	if strings.Contains(outputStr, "\"code\": 429") ||
 		strings.Contains(outputStr, "status 429") ||
 		strings.Contains(outputStr, "Too Many Requests") ||
 		strings.Contains(outputStr, "rateLimitExceeded") ||
-		strings.Contains(outputStr, "RESOURCE_EXHAUSTED") {
+		strings.Contains(outputStr, "RESOURCE_EXHAUSTED") ||
+		strings.Contains(strings.ToLower(outputStr), "capacity") ||
+		strings.Contains(strings.ToLower(outputStr), "quota") {
 		return &model.GeminiStatus{
 			HTTPStatus: http.StatusTooManyRequests,
 			Code:       "RESOURCE_EXHAUSTED",
 			Message:    "Upstream rate limited or model capacity exhausted",
 		}
 	}
-
 	return nil
+}
+
+func parseHTTPStatusFromCode(code string) (int, bool) {
+	parsed, err := strconv.Atoi(strings.TrimSpace(code))
+	if err != nil {
+		return 0, false
+	}
+	if parsed < 100 || parsed > 599 {
+		return 0, false
+	}
+	return parsed, true
 }
 
 func extractLastJSONObject(outputStr string) (string, bool) {

@@ -37,4 +37,5 @@ type GeminiStatus struct {
 	HTTPStatus int    `json:"httpStatus"`
 	Code       string `json:"code,omitempty"`
 	Message    string `json:"message,omitempty"`
+	Model      string `json:"model,omitempty"`
 }

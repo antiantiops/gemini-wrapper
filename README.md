@@ -318,6 +318,16 @@ Authentication behavior for `/v1/*` depends on container environment:
 - If `OPENAI_API_KEY` is **not set**: Bearer token is optional.
 - If `OPENAI_API_KEY` **is set**: requests must send `Authorization: Bearer <OPENAI_API_KEY>`.
 
+### Optional model fallback (`FALLBACK_MODEL`)
+
+You can configure fallback models for capacity/rate-limit errors (for example when `gemini-3.1-pro-preview` is exhausted):
+
+- Supports bracket list: `FALLBACK_MODEL=[gemini-2.5-flash,gemini-2.5-flash-lite]`
+- Supports comma-separated list: `FALLBACK_MODEL=gemini-2.5-flash,gemini-2.5-flash-lite`
+- Retry happens in listed order.
+- On successful fallback, logs show the fallback attempt and success model.
+- OpenAI-compatible responses return the actual `model` used after fallback.
+
 Run container with OpenAI-compatible API key enabled:
 
 ```bash
@@ -325,6 +335,7 @@ docker rm -f gemini-wrapper
 docker run -d -p 8080:8080 \
   -v ~/.gemini:/app/.gemini \
   -e OPENAI_API_KEY=sk-local-demo \
+  -e FALLBACK_MODEL=gemini-2.5-flash,gemini-2.5-flash-lite \
   --name gemini-wrapper \
   antiantiops/gemini-wrapper:latest
 ```
@@ -336,6 +347,7 @@ docker rm -f gemini-wrapper
 docker run -d -p 8080:8080 `
   -v ${env:USERPROFILE}\.gemini:/app/.gemini `
   -e OPENAI_API_KEY=sk-local-demo `
+  -e FALLBACK_MODEL=gemini-2.5-flash,gemini-2.5-flash-lite `
   --name gemini-wrapper `
   antiantiops/gemini-wrapper:latest
 ```

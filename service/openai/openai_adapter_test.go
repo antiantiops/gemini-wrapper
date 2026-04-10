@@ -11,6 +11,7 @@ import (
 type fakeGeminiService struct {
 	answer string
 	err    error
+	status *model.GeminiStatus
 }
 
 func (f *fakeGeminiService) Ask(_ string, modelName string) (string, *model.GeminiStatus, error) {
@@ -18,7 +19,7 @@ func (f *fakeGeminiService) Ask(_ string, modelName string) (string, *model.Gemi
 	if f.err != nil {
 		return "", &model.GeminiStatus{HTTPStatus: 500, Code: "internal_error", Message: f.err.Error()}, f.err
 	}
-	return f.answer, nil, nil
+	return f.answer, f.status, nil
 }
 
 func (f *fakeGeminiService) AskWithEnv(question string, modelName string, _ map[string]string) (string, *model.GeminiStatus, error) {
@@ -233,5 +234,26 @@ func TestCreateResponseRejectsContentArrayMapWithoutNonEmptyText(t *testing.T) {
 	}
 	if !strings.Contains(apiErr.Message, "input content[0]") {
 		t.Fatalf("expected indexed content error, got: %q", apiErr.Message)
+	}
+}
+
+func TestCreateChatCompletionUsesResolvedModelFromStatus(t *testing.T) {
+	svc := &fakeGeminiService{
+		answer: "hello",
+		status: &model.GeminiStatus{Model: "gemini-2.5-flash"},
+	}
+	adapter := NewGeminiAdapter(svc)
+
+	resp, err := adapter.CreateChatCompletion(model.OpenAIChatCompletionRequest{
+		Model: "gemini-3.1-pro-preview",
+		Messages: []model.OpenAIChatMessage{
+			{Role: "user", Content: "say hi"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Model != "gemini-2.5-flash" {
+		t.Fatalf("expected fallback model in response, got %q", resp.Model)
 	}
 }
