@@ -1,20 +1,60 @@
 package gemini_impl
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"gemini-wrapper/model"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	"go.etcd.io/bbolt"
+	"golang.org/x/sync/singleflight"
 )
+
+const askCacheBucket = "ask_cache"
 
 type GeminiService struct {
 	mu             sync.Mutex
 	fallbackModels []string
+
+	cacheEnabled bool
+	cacheTTL     time.Duration
+	cacheMaxSize int
+	cache        map[string]cacheEntry
+
+	diskCacheEnabled    bool
+	diskCachePath       string
+	diskCleanupInterval time.Duration
+	diskDB              *bbolt.DB
+
+	dedupeEnabled bool
+	requestGroup  singleflight.Group
+}
+
+type cacheEntry struct {
+	answer    string
+	status    *model.GeminiStatus
+	expiresAt time.Time
+}
+
+type diskCacheRecord struct {
+	Answer        string          `json:"answer"`
+	StatusJSON    json.RawMessage `json:"status_json,omitempty"`
+	ExpiresAtUnix int64           `json:"expires_at_unix"`
+}
+
+type askExecutionResult struct {
+	answer string
+	status *model.GeminiStatus
+	err    error
 }
 
 // GeminiResponse represents the JSON response from gemini CLI headless mode
@@ -36,19 +76,94 @@ type GeminiResponse struct {
 
 func NewGeminiService() *GeminiService {
 	fallbackModels := parseFallbackModels(os.Getenv("FALLBACK_MODEL"))
-	if len(fallbackModels) == 0 {
-		fmt.Println("Gemini service initialized (using headless mode)")
-	} else {
-		fmt.Printf("Gemini service initialized (using headless mode, fallback models: %s)\n", strings.Join(fallbackModels, ", "))
+	cacheEnabled := parseEnvBool("CACHE_ENABLED", true)
+	cacheTTL := parseEnvSeconds("CACHE_TTL_SECONDS", 1800)
+	cacheMaxSize := parseEnvInt("CACHE_MAX_ENTRIES", 5000)
+	dedupeEnabled := parseEnvBool("CACHE_DEDUPE_ENABLED", true)
+	diskCacheEnabled := parseEnvBool("CACHE_DISK_ENABLED", true)
+	diskCachePath := strings.TrimSpace(os.Getenv("CACHE_DISK_PATH"))
+	diskCleanupInterval := parseEnvSeconds("CACHE_DISK_CLEANUP_INTERVAL_SECONDS", 7*24*60*60)
+	if diskCachePath == "" {
+		diskCachePath = "/app/cache/gemini-cache.db"
 	}
-	return &GeminiService{fallbackModels: fallbackModels}
+
+	service := &GeminiService{
+		fallbackModels:      fallbackModels,
+		cacheEnabled:        cacheEnabled,
+		cacheTTL:            cacheTTL,
+		cacheMaxSize:        cacheMaxSize,
+		cache:               map[string]cacheEntry{},
+		diskCacheEnabled:    diskCacheEnabled,
+		diskCachePath:       diskCachePath,
+		diskCleanupInterval: diskCleanupInterval,
+		dedupeEnabled:       dedupeEnabled,
+	}
+	if err := service.initDiskCache(); err != nil {
+		fmt.Printf("Warning: disk cache disabled: %v\n", err)
+		service.diskCacheEnabled = false
+	} else if service.diskCacheEnabled && service.diskCleanupInterval > 0 {
+		go service.startDiskCleanupLoop()
+	}
+
+	fmt.Printf("Gemini service initialized (using headless mode%s)\n", formatFallbackModels(fallbackModels))
+	fmt.Printf("Cache config: enabled=%t ttl=%s max_entries=%d dedupe=%t disk_enabled=%t disk_path=%s disk_cleanup_interval=%s\n", cacheEnabled, cacheTTL, cacheMaxSize, dedupeEnabled, service.diskCacheEnabled, service.diskCachePath, service.diskCleanupInterval)
+	return service
+}
+
+func (s *GeminiService) initDiskCache() error {
+	if !s.diskCacheEnabled {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(s.diskCachePath), 0o755); err != nil {
+		return err
+	}
+	db, err := bbolt.Open(s.diskCachePath, 0o600, &bbolt.Options{Timeout: time.Second})
+	if err != nil {
+		return err
+	}
+	if err := db.Update(func(tx *bbolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte(askCacheBucket))
+		return err
+	}); err != nil {
+		_ = db.Close()
+		return err
+	}
+	s.diskDB = db
+	return nil
 }
 
 // Ask sends a question to Gemini CLI using headless mode and returns the response.
 func (s *GeminiService) Ask(question string, modelName string) (string, *model.GeminiStatus, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	question = strings.TrimSpace(question)
+	cacheKey := s.buildCacheKey(question, modelName)
+	if answer, status, ok := s.getCached(cacheKey); ok {
+		return answer, status, nil
+	}
 
+	if !s.dedupeEnabled {
+		answer, status, err := s.askWithFallback(question, modelName)
+		if err == nil {
+			s.setCached(cacheKey, answer, status)
+		}
+		return answer, status, err
+	}
+
+	resultRaw, _, _ := s.requestGroup.Do(cacheKey, func() (interface{}, error) {
+		answer, status, err := s.askWithFallback(question, modelName)
+		if err == nil {
+			s.setCached(cacheKey, answer, status)
+		}
+		return askExecutionResult{answer: answer, status: status, err: err}, nil
+	})
+
+	result, ok := resultRaw.(askExecutionResult)
+	if !ok {
+		return "", nil, fmt.Errorf("failed to process request")
+	}
+	return result.answer, result.status, result.err
+}
+
+func (s *GeminiService) askWithFallback(question string, modelName string) (string, *model.GeminiStatus, error) {
 	attemptModels := s.buildAttemptModels(modelName)
 	if len(attemptModels) == 0 {
 		attemptModels = []string{""}
@@ -97,6 +212,224 @@ func (s *GeminiService) Ask(question string, modelName string) (string, *model.G
 		return preservedAnswer, preservedStatus, nil
 	}
 	return "", nil, fmt.Errorf("failed to process request")
+}
+
+func (s *GeminiService) buildCacheKey(question string, modelName string) string {
+	normalizedModel := strings.TrimSpace(modelName)
+	if normalizedModel == "" {
+		normalizedModel = "auto"
+	}
+	sum := sha256.Sum256([]byte(normalizedModel + "\n" + strings.TrimSpace(question)))
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *GeminiService) getCached(key string) (string, *model.GeminiStatus, bool) {
+	if !s.cacheEnabled {
+		return "", nil, false
+	}
+
+	now := time.Now()
+	s.mu.Lock()
+	entry, ok := s.cache[key]
+	if ok {
+		if now.After(entry.expiresAt) {
+			delete(s.cache, key)
+		} else {
+			answer := entry.answer
+			status := cloneGeminiStatus(entry.status)
+			s.mu.Unlock()
+			return answer, status, true
+		}
+	}
+	s.mu.Unlock()
+
+	answer, status, expiresAt, ok := s.getDiskCached(key, now)
+	if !ok {
+		return "", nil, false
+	}
+
+	s.mu.Lock()
+	s.cache[key] = cacheEntry{answer: answer, status: cloneGeminiStatus(status), expiresAt: expiresAt}
+	s.mu.Unlock()
+	return answer, status, true
+}
+
+func (s *GeminiService) setCached(key, answer string, status *model.GeminiStatus) {
+	if !s.cacheEnabled || strings.TrimSpace(answer) == "" {
+		return
+	}
+
+	expiresAt := time.Now().Add(s.cacheTTL)
+	s.mu.Lock()
+	if s.cacheMaxSize > 0 && len(s.cache) >= s.cacheMaxSize {
+		s.evictCacheLocked(time.Now())
+	}
+	s.cache[key] = cacheEntry{answer: answer, status: cloneGeminiStatus(status), expiresAt: expiresAt}
+	s.mu.Unlock()
+
+	s.setDiskCached(key, answer, status, expiresAt)
+}
+
+func (s *GeminiService) evictCacheLocked(now time.Time) {
+	for key, entry := range s.cache {
+		if now.After(entry.expiresAt) {
+			delete(s.cache, key)
+		}
+	}
+	for s.cacheMaxSize > 0 && len(s.cache) >= s.cacheMaxSize {
+		for key := range s.cache {
+			delete(s.cache, key)
+			break
+		}
+	}
+}
+
+func (s *GeminiService) getDiskCached(key string, now time.Time) (string, *model.GeminiStatus, time.Time, bool) {
+	if !s.diskCacheEnabled || s.diskDB == nil {
+		return "", nil, time.Time{}, false
+	}
+
+	var record diskCacheRecord
+	found := false
+	stale := false
+	err := s.diskDB.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(askCacheBucket))
+		if bucket == nil {
+			return nil
+		}
+		raw := bucket.Get([]byte(key))
+		if len(raw) == 0 {
+			return nil
+		}
+		if err := json.Unmarshal(raw, &record); err != nil {
+			return nil
+		}
+		found = true
+		if record.ExpiresAtUnix <= now.Unix() {
+			stale = true
+		}
+		return nil
+	})
+	if err != nil || !found {
+		return "", nil, time.Time{}, false
+	}
+
+	if stale {
+		s.deleteDiskCacheKey(key)
+		return "", nil, time.Time{}, false
+	}
+
+	var status *model.GeminiStatus
+	if len(record.StatusJSON) > 0 {
+		var parsed model.GeminiStatus
+		if err := json.Unmarshal(record.StatusJSON, &parsed); err == nil {
+			status = &parsed
+		}
+	}
+	return record.Answer, status, time.Unix(record.ExpiresAtUnix, 0), true
+}
+
+func (s *GeminiService) setDiskCached(key, answer string, status *model.GeminiStatus, expiresAt time.Time) {
+	if !s.diskCacheEnabled || s.diskDB == nil || strings.TrimSpace(answer) == "" {
+		return
+	}
+
+	var statusJSON []byte
+	if status != nil {
+		b, err := json.Marshal(status)
+		if err == nil {
+			statusJSON = b
+		}
+	}
+	record := diskCacheRecord{Answer: answer, StatusJSON: statusJSON, ExpiresAtUnix: expiresAt.Unix()}
+	payload, err := json.Marshal(record)
+	if err != nil {
+		return
+	}
+
+	_ = s.diskDB.Update(func(tx *bbolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte(askCacheBucket))
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(key), payload)
+	})
+}
+
+func (s *GeminiService) deleteDiskCacheKey(key string) {
+	if !s.diskCacheEnabled || s.diskDB == nil {
+		return
+	}
+	_ = s.diskDB.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(askCacheBucket))
+		if bucket == nil {
+			return nil
+		}
+		return bucket.Delete([]byte(key))
+	})
+}
+
+func (s *GeminiService) startDiskCleanupLoop() {
+	ticker := time.NewTicker(s.diskCleanupInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.cleanupExpiredDiskCache(time.Now().Unix())
+	}
+}
+
+func (s *GeminiService) cleanupExpiredDiskCache(nowUnix int64) {
+	if !s.diskCacheEnabled || s.diskDB == nil {
+		return
+	}
+	_ = s.diskDB.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(askCacheBucket))
+		if bucket == nil {
+			return nil
+		}
+		cursor := bucket.Cursor()
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			var record diskCacheRecord
+			if err := json.Unmarshal(value, &record); err != nil || record.ExpiresAtUnix <= nowUnix {
+				if err := cursor.Delete(); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+func cloneGeminiStatus(status *model.GeminiStatus) *model.GeminiStatus {
+	if status == nil {
+		return nil
+	}
+	statusCopy := *status
+	return &statusCopy
+}
+
+func parseEnvBool(key string, defaultValue bool) bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if raw == "" {
+		return defaultValue
+	}
+	return raw == "1" || raw == "true" || raw == "yes" || raw == "on"
+}
+
+func parseEnvInt(key string, defaultValue int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed <= 0 {
+		return defaultValue
+	}
+	return parsed
+}
+
+func parseEnvSeconds(key string, defaultSeconds int) time.Duration {
+	seconds := parseEnvInt(key, defaultSeconds)
+	return time.Duration(seconds) * time.Second
 }
 
 func (s *GeminiService) askOnce(question string, modelName string) (string, *model.GeminiStatus, error) {
@@ -548,4 +881,11 @@ func shouldFallbackAfterSuccess(status *model.GeminiStatus, attemptIndex int, to
 		return false
 	}
 	return attemptIndex < totalAttempts-1
+}
+
+func formatFallbackModels(fallbackModels []string) string {
+	if len(fallbackModels) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", fallback models: %s", strings.Join(fallbackModels, ", "))
 }
