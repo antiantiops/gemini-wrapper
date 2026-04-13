@@ -6,7 +6,7 @@ import (
 
 	"gemini-wrapper/model"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 type AuthConfig struct {
@@ -15,7 +15,7 @@ type AuthConfig struct {
 
 func RequireBearerAuth(cfg AuthConfig) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
+		return func(c *echo.Context) error {
 			if cfg.APIKey == "" {
 				return next(c)
 			}

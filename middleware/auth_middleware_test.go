@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 func TestRequireBearerAuth(t *testing.T) {
@@ -16,7 +16,7 @@ func TestRequireBearerAuth(t *testing.T) {
 	c := e.NewContext(req, rec)
 
 	mw := RequireBearerAuth(AuthConfig{APIKey: "test-key"})
-	h := mw(func(c echo.Context) error {
+	h := mw(func(c *echo.Context) error {
 		return c.NoContent(http.StatusOK)
 	})
 
@@ -36,7 +36,7 @@ func TestRequireBearerAuthInvalidKey(t *testing.T) {
 	c := e.NewContext(req, rec)
 
 	mw := RequireBearerAuth(AuthConfig{APIKey: "test-key"})
-	h := mw(func(c echo.Context) error {
+	h := mw(func(c *echo.Context) error {
 		return c.NoContent(http.StatusOK)
 	})
 

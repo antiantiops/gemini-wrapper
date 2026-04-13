@@ -249,6 +249,9 @@ func (s *GeminiService) getCached(key string) (string, *model.GeminiStatus, bool
 	}
 
 	s.mu.Lock()
+	if _, exists := s.cache[key]; !exists && s.cacheMaxSize > 0 && len(s.cache) >= s.cacheMaxSize {
+		s.evictCacheLocked(time.Now())
+	}
 	s.cache[key] = cacheEntry{answer: answer, status: cloneGeminiStatus(status), expiresAt: expiresAt}
 	s.mu.Unlock()
 	return answer, status, true
