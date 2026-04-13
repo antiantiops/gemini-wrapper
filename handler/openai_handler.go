@@ -87,7 +87,10 @@ func writeResponseSSE(c *echo.Context, resp model.OpenAIResponse) error {
 	r.Header().Set("Cache-Control", "no-cache")
 	r.Header().Set("Connection", "keep-alive")
 	r.WriteHeader(http.StatusOK)
-	flusher, _ := r.(http.Flusher)
+	flusher, ok := r.(http.Flusher)
+	if !ok {
+		return fmt.Errorf("response writer does not implement http.Flusher")
+	}
 
 	writeEvent := func(event string, payload interface{}) error {
 		body, err := json.Marshal(payload)
@@ -97,9 +100,7 @@ func writeResponseSSE(c *echo.Context, resp model.OpenAIResponse) error {
 		if _, err := fmt.Fprintf(r, "event: %s\ndata: %s\n\n", event, string(body)); err != nil {
 			return err
 		}
-		if flusher != nil {
-			flusher.Flush()
-		}
+		flusher.Flush()
 		return nil
 	}
 
@@ -119,9 +120,7 @@ func writeResponseSSE(c *echo.Context, resp model.OpenAIResponse) error {
 	}
 
 	_, err := fmt.Fprint(r, "data: [DONE]\n\n")
-	if flusher != nil {
-		flusher.Flush()
-	}
+	flusher.Flush()
 	return err
 }
 
