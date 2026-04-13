@@ -224,48 +224,54 @@ func (s *GeminiService) buildCacheKey(question string, modelName string) string 
 }
 
 func (s *GeminiService) getCached(key string) (string, *model.GeminiStatus, bool) {
-	if !s.cacheEnabled {
+	if !s.cacheEnabled && !s.diskCacheEnabled {
 		return "", nil, false
 	}
 
 	now := time.Now()
-	s.mu.Lock()
-	entry, ok := s.cache[key]
-	if ok {
-		if now.After(entry.expiresAt) {
-			delete(s.cache, key)
-		} else {
-			answer := entry.answer
-			status := cloneGeminiStatus(entry.status)
-			s.mu.Unlock()
-			return answer, status, true
+	if s.cacheEnabled {
+		s.mu.Lock()
+		entry, ok := s.cache[key]
+		if ok {
+			if now.After(entry.expiresAt) {
+				delete(s.cache, key)
+			} else {
+				answer := entry.answer
+				status := cloneGeminiStatus(entry.status)
+				s.mu.Unlock()
+				return answer, status, true
+			}
 		}
+		s.mu.Unlock()
 	}
-	s.mu.Unlock()
 
 	answer, status, expiresAt, ok := s.getDiskCached(key, now)
 	if !ok {
 		return "", nil, false
 	}
 
-	s.mu.Lock()
-	s.cache[key] = cacheEntry{answer: answer, status: cloneGeminiStatus(status), expiresAt: expiresAt}
-	s.mu.Unlock()
+	if s.cacheEnabled {
+		s.mu.Lock()
+		s.cache[key] = cacheEntry{answer: answer, status: cloneGeminiStatus(status), expiresAt: expiresAt}
+		s.mu.Unlock()
+	}
 	return answer, status, true
 }
 
 func (s *GeminiService) setCached(key, answer string, status *model.GeminiStatus) {
-	if !s.cacheEnabled || strings.TrimSpace(answer) == "" {
+	if (!s.cacheEnabled && !s.diskCacheEnabled) || strings.TrimSpace(answer) == "" {
 		return
 	}
 
 	expiresAt := time.Now().Add(s.cacheTTL)
-	s.mu.Lock()
-	if s.cacheMaxSize > 0 && len(s.cache) >= s.cacheMaxSize {
-		s.evictCacheLocked(time.Now())
+	if s.cacheEnabled {
+		s.mu.Lock()
+		if s.cacheMaxSize > 0 && len(s.cache) >= s.cacheMaxSize {
+			s.evictCacheLocked(time.Now())
+		}
+		s.cache[key] = cacheEntry{answer: answer, status: cloneGeminiStatus(status), expiresAt: expiresAt}
+		s.mu.Unlock()
 	}
-	s.cache[key] = cacheEntry{answer: answer, status: cloneGeminiStatus(status), expiresAt: expiresAt}
-	s.mu.Unlock()
 
 	s.setDiskCached(key, answer, status, expiresAt)
 }
