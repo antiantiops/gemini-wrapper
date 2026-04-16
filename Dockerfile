@@ -19,7 +19,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -o gemini-wrapper .
 
 # Runtime stage
-FROM node:20-bookworm-slim
+FROM node:24-bookworm-slim
 
 # Install build dependencies for native modules and runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
