@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 type GeminiHandler struct {
@@ -18,7 +18,7 @@ func NewGeminiHandler(service *gemini_impl.GeminiService) *GeminiHandler {
 }
 
 // HandleAsk handles POST /api/ask.
-func (g *GeminiHandler) HandleAsk(c echo.Context) error {
+func (g *GeminiHandler) HandleAsk(c *echo.Context) error {
 	if g == nil || g.service == nil {
 		return c.JSON(http.StatusInternalServerError, model.AskResponse{Error: "service not initialized"})
 	}
@@ -42,7 +42,7 @@ func (g *GeminiHandler) HandleAsk(c echo.Context) error {
 }
 
 // HandleGeminiAPI handles POST /v1beta/models/:model.
-func (g *GeminiHandler) HandleGeminiAPI(c echo.Context) error {
+func (g *GeminiHandler) HandleGeminiAPI(c *echo.Context) error {
 	if g == nil || g.service == nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"error": map[string]interface{}{

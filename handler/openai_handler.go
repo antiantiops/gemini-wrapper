@@ -8,7 +8,7 @@ import (
 	"gemini-wrapper/model"
 	"gemini-wrapper/service/openai"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 type OpenAIHandler struct {
@@ -19,14 +19,14 @@ func NewOpenAIHandler(service openai.Service) *OpenAIHandler {
 	return &OpenAIHandler{service: service}
 }
 
-func (h *OpenAIHandler) ListModels(c echo.Context) error {
+func (h *OpenAIHandler) ListModels(c *echo.Context) error {
 	if h == nil || h.service == nil {
 		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "OpenAI adapter is not initialized"})
 	}
 	return c.JSON(http.StatusOK, h.service.ListModels())
 }
 
-func (h *OpenAIHandler) CreateChatCompletion(c echo.Context) error {
+func (h *OpenAIHandler) CreateChatCompletion(c *echo.Context) error {
 	if h == nil || h.service == nil {
 		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "OpenAI adapter is not initialized"})
 	}
@@ -43,7 +43,7 @@ func (h *OpenAIHandler) CreateChatCompletion(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-func (h *OpenAIHandler) CreateCompletion(c echo.Context) error {
+func (h *OpenAIHandler) CreateCompletion(c *echo.Context) error {
 	if h == nil || h.service == nil {
 		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "OpenAI adapter is not initialized"})
 	}
@@ -60,7 +60,7 @@ func (h *OpenAIHandler) CreateCompletion(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-func (h *OpenAIHandler) CreateResponse(c echo.Context) error {
+func (h *OpenAIHandler) CreateResponse(c *echo.Context) error {
 	if h == nil || h.service == nil {
 		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "OpenAI adapter is not initialized"})
 	}
@@ -81,12 +81,16 @@ func (h *OpenAIHandler) CreateResponse(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-func writeResponseSSE(c echo.Context, resp model.OpenAIResponse) error {
+func writeResponseSSE(c *echo.Context, resp model.OpenAIResponse) error {
 	r := c.Response()
 	r.Header().Set(echo.HeaderContentType, "text/event-stream")
 	r.Header().Set("Cache-Control", "no-cache")
 	r.Header().Set("Connection", "keep-alive")
 	r.WriteHeader(http.StatusOK)
+	flusher, ok := r.(http.Flusher)
+	if !ok {
+		return fmt.Errorf("response writer does not implement http.Flusher")
+	}
 
 	writeEvent := func(event string, payload interface{}) error {
 		body, err := json.Marshal(payload)
@@ -96,7 +100,7 @@ func writeResponseSSE(c echo.Context, resp model.OpenAIResponse) error {
 		if _, err := fmt.Fprintf(r, "event: %s\ndata: %s\n\n", event, string(body)); err != nil {
 			return err
 		}
-		r.Flush()
+		flusher.Flush()
 		return nil
 	}
 
@@ -116,11 +120,11 @@ func writeResponseSSE(c echo.Context, resp model.OpenAIResponse) error {
 	}
 
 	_, err := fmt.Fprint(r, "data: [DONE]\n\n")
-	r.Flush()
+	flusher.Flush()
 	return err
 }
 
-func writeOpenAIError(c echo.Context, err error) error {
+func writeOpenAIError(c *echo.Context, err error) error {
 	if apiErr, ok := err.(*openai.APIError); ok {
 		status := apiErr.HTTPStatus
 		if status <= 0 {

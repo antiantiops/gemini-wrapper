@@ -6,7 +6,7 @@ import (
 	"gemini-wrapper/handler"
 	appmiddleware "gemini-wrapper/middleware"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 type API struct {
@@ -17,7 +17,7 @@ type API struct {
 }
 
 func (api *API) SetupRouter() {
-	healthHandler := func(c echo.Context) error {
+	healthHandler := func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{
 			"message": "Gemini Wrapper API",
 			"status":  "running",

@@ -8,8 +8,8 @@ import (
 	"gemini-wrapper/service/gemini/gemini_impl"
 	"gemini-wrapper/service/openai"
 
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 )
 
 func main() {
@@ -17,7 +17,7 @@ func main() {
 	e := echo.New()
 
 	// Middleware
-	e.Use(middleware.Logger())
+	e.Use(middleware.RequestLogger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
 
@@ -41,5 +41,7 @@ func main() {
 		port = "8080"
 	}
 
-	e.Logger.Fatal(e.Start(":" + port))
+	if err := e.Start(":" + port); err != nil {
+		panic(err)
+	}
 }
