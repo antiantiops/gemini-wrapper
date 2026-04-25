@@ -19,7 +19,7 @@ func main() {
 	// Middleware
 	e.Use(middleware.RequestLogger())
 	e.Use(middleware.Recover())
-	e.Use(middleware.CORS())
+	e.Use(middleware.CORS("*"))
 
 	// Initialize Gemini and OpenAI-compatible handlers
 	geminiService := gemini_impl.NewGeminiService()
