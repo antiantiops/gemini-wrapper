@@ -36,8 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Antigravity CLI
 # Official Linux install: https://antigravity.google/cli/install.sh
-RUN curl -fsSL https://antigravity.google/cli/install.sh | bash && \
-  agy --version && \
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin && \
+  /usr/local/bin/agy --version && \
   echo "✓ Antigravity CLI installed successfully"
 
 # Set up working directory

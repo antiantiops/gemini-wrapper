@@ -463,11 +463,16 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	// Create command
 	cmd := exec.Command(cliCommand, args...)
 
+	homeDir := strings.TrimSpace(os.Getenv("HOME"))
+	if homeDir == "" {
+		homeDir = "/app"
+	}
+
 	// Set environment variables
 	cmd.Env = append(os.Environ(),
-		"HOME=/app",
+		"HOME="+homeDir,
 		"ANTIGRAVITY_CONFIG_DIR="+configDir,
-		"XDG_CONFIG_HOME=/app",
+		"XDG_CONFIG_HOME="+homeDir,
 	)
 
 	// Run command and capture output
