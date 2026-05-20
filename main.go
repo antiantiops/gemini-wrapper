@@ -21,17 +21,17 @@ func main() {
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS("*"))
 
-	// Initialize Gemini and OpenAI-compatible handlers
-	geminiService := gemini_impl.NewGeminiService()
-	geminiHandler := handler.NewGeminiHandler(geminiService)
-	openAIAdapter := openai.NewGeminiAdapter(geminiService)
+	// Initialize Antigravity CLI backend and OpenAI-compatible handlers
+	geminiService := gemini_impl.NewAntigravityService()
+	geminiHandler := handler.NewAntigravityHandler(geminiService)
+	openAIAdapter := openai.NewAntigravityAdapter(geminiService)
 	openAIHandler := handler.NewOpenAIHandler(openAIAdapter)
 
 	api := &router.API{
-		Echo:          e,
-		GeminiHandler: geminiHandler,
-		OpenAIHandler: openAIHandler,
-		OpenAIAPIKey:  os.Getenv("OPENAI_API_KEY"),
+		Echo:               e,
+		AntigravityHandler: geminiHandler,
+		OpenAIHandler:      openAIHandler,
+		OpenAIAPIKey:       os.Getenv("OPENAI_API_KEY"),
 	}
 	api.SetupRouter()
 

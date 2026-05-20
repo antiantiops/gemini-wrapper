@@ -105,9 +105,13 @@ func NewGeminiService() *GeminiService {
 		go service.startDiskCleanupLoop()
 	}
 
-	fmt.Printf("Gemini service initialized (using headless mode%s)\n", formatFallbackModels(fallbackModels))
+	fmt.Printf("Antigravity service initialized (using headless mode%s)\n", formatFallbackModels(fallbackModels))
 	fmt.Printf("Cache config: enabled=%t ttl=%s max_entries=%d dedupe=%t disk_enabled=%t disk_path=%s disk_cleanup_interval=%s\n", cacheEnabled, cacheTTL, cacheMaxSize, dedupeEnabled, service.diskCacheEnabled, service.diskCachePath, service.diskCleanupInterval)
 	return service
+}
+
+func NewAntigravityService() *GeminiService {
+	return NewGeminiService()
 }
 
 func (s *GeminiService) initDiskCache() error {
@@ -447,13 +451,22 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 		args = append(args, "--model", modelName)
 	}
 
+	cliCommand := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CLI_COMMAND"))
+	if cliCommand == "" {
+		cliCommand = "antigravity"
+	}
+	configDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CONFIG_DIR"))
+	if configDir == "" {
+		configDir = "/app/.antigravity"
+	}
+
 	// Create command
-	cmd := exec.Command("gemini", args...)
+	cmd := exec.Command(cliCommand, args...)
 
 	// Set environment variables
 	cmd.Env = append(os.Environ(),
 		"HOME=/app",
-		"GEMINI_CONFIG_DIR=/app/.gemini",
+		"ANTIGRAVITY_CONFIG_DIR="+configDir,
 		"XDG_CONFIG_HOME=/app",
 	)
 
