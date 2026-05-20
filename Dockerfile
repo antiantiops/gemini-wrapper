@@ -34,11 +34,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Antigravity CLI (override with --build-arg if package/command differs)
-ARG ANTIGRAVITY_CLI_INSTALL="npm install -g @antigravity/cli"
-ARG ANTIGRAVITY_CLI_VERIFY="antigravity --version"
-RUN bash -lc "$ANTIGRAVITY_CLI_INSTALL" && \
-  bash -lc "$ANTIGRAVITY_CLI_VERIFY" && \
+# Install Antigravity CLI
+# Official Linux install: https://antigravity.google/cli/install.sh
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash && \
+  agy --version && \
   echo "✓ Antigravity CLI installed successfully"
 
 # Set up working directory
@@ -58,7 +57,7 @@ EXPOSE 8080
 ENV PORT=8080
 ENV HOME=/app
 ENV ANTIGRAVITY_CONFIG_DIR=/app/.antigravity
-ENV ANTIGRAVITY_CLI_COMMAND=antigravity
+ENV ANTIGRAVITY_CLI_COMMAND=agy
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

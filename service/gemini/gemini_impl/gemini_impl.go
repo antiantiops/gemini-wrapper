@@ -453,7 +453,7 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 
 	cliCommand := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CLI_COMMAND"))
 	if cliCommand == "" {
-		cliCommand = "antigravity"
+		cliCommand = "agy"
 	}
 	configDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CONFIG_DIR"))
 	if configDir == "" {
@@ -477,11 +477,11 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	if err != nil {
 		// Provide helpful error messages for common issues
 		if strings.Contains(outputStr, "ModelNotFoundError") || strings.Contains(outputStr, "not found") {
-			return "", status, fmt.Errorf("model not found: the model '%s' doesn't exist or isn't available. Use 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro', or omit model for auto-selection", modelName)
+			return "", status, fmt.Errorf("model not found: the model '%s' doesn't exist or isn't available in Antigravity", modelName)
 		}
 
 		if strings.Contains(outputStr, "authentication") || strings.Contains(outputStr, "auth") {
-			return "", status, fmt.Errorf("authentication error: make sure ~/.gemini is mounted correctly and you're authenticated")
+			return "", status, fmt.Errorf("authentication error: make sure ~/.antigravity is mounted correctly and you're authenticated with Antigravity or Antigravity IDE")
 		}
 
 		response, ok := parseGeminiOutput(outputStr)
@@ -492,7 +492,7 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 				if status != nil && status.HTTPStatus == http.StatusTooManyRequests && answer != "" {
 					return answer, status, nil
 				}
-				return "", status, fmt.Errorf("gemini error: %s - %s", response.Error.Type, response.Error.Message)
+				return "", status, fmt.Errorf("antigravity error: %s - %s", response.Error.Type, response.Error.Message)
 			}
 
 			answer := strings.TrimSpace(response.Response)
@@ -501,7 +501,7 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 			}
 		}
 
-		return "", status, fmt.Errorf("failed to execute gemini CLI: %v (output: %s)", err, outputStr)
+		return "", status, fmt.Errorf("failed to execute Antigravity CLI (%s): %v (output: %s)", cliCommand, err, outputStr)
 	}
 
 	response, ok := parseGeminiOutput(outputStr)
@@ -519,11 +519,11 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 		if status != nil && status.HTTPStatus == http.StatusTooManyRequests && answer != "" {
 			return answer, status, nil
 		}
-		errorMsg := fmt.Sprintf("gemini error: %s - %s", response.Error.Type, response.Error.Message)
+		errorMsg := fmt.Sprintf("antigravity error: %s - %s", response.Error.Type, response.Error.Message)
 
 		// Provide helpful message for common errors
 		if strings.Contains(errorMsg, "ModelNotFoundError") || strings.Contains(errorMsg, "not found") {
-			return "", status, fmt.Errorf("model not found: the specified model doesn't exist or isn't available. Try using 'gemini-2.5-flash' or don't specify a model for auto-selection")
+			return "", status, fmt.Errorf("model not found: the specified model doesn't exist or isn't available in Antigravity")
 		}
 
 		return "", status, fmt.Errorf("%s", errorMsg)
@@ -532,7 +532,7 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	// Return the response text
 	answer := strings.TrimSpace(response.Response)
 	if answer == "" {
-		return "", status, fmt.Errorf("received empty response from gemini")
+		return "", status, fmt.Errorf("received empty response from Antigravity")
 	}
 
 	fmt.Printf("✓ Response received (%d chars)\n", len(answer))
