@@ -10,6 +10,11 @@ if command -v dbus-launch >/dev/null 2>&1; then
 fi
 
 if command -v gnome-keyring-daemon >/dev/null 2>&1; then
+  mkdir -p "${HOME}/.local/share/keyrings"
+  # Create/unlock the default collection with a blank password. This is scoped to
+  # the container and fixes Antigravity CLI's Secret Service error:
+  # "failed to unlock correct collection '/org/freedesktop/secrets/aliases/default'".
+  printf '\n' | gnome-keyring-daemon --unlock >/dev/null 2>&1 || true
   keyring_env="$(gnome-keyring-daemon --start --components=secrets)"
   keyring_status=$?
   if [ ${keyring_status} -ne 0 ]; then
@@ -18,6 +23,7 @@ if command -v gnome-keyring-daemon >/dev/null 2>&1; then
     eval "${keyring_env}"
     export GNOME_KEYRING_CONTROL SSH_AUTH_SOCK
   fi
+  printf '\n' | gnome-keyring-daemon --unlock >/dev/null 2>&1 || true
 fi
 
 # Make the same session available to manual `docker exec` login commands:
