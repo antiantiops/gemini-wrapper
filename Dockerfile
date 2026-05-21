@@ -31,6 +31,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
+    dbus-x11 \
+    gnome-keyring \
+    libsecret-1-0 \
     && ln -sf python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
@@ -45,10 +48,11 @@ WORKDIR /app
 
 # Copy the binary from builder
 COPY --from=builder /app/gemini-wrapper .
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Create Antigravity config directory
 # Running as root to avoid permission issues with mounted volumes
-RUN mkdir -p /app/.antigravity
+RUN mkdir -p /app/.gemini/antigravity-cli && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Expose port
 EXPOSE 8080
@@ -56,7 +60,7 @@ EXPOSE 8080
 # Set environment variables
 ENV PORT=8080
 ENV HOME=/app
-ENV ANTIGRAVITY_CONFIG_DIR=/app/.antigravity
+ENV ANTIGRAVITY_CONFIG_DIR=/app/.gemini
 ENV ANTIGRAVITY_CLI_COMMAND=agy
 
 # Health check
@@ -65,4 +69,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 # Run as root user to avoid permission issues with mounted volumes
 # Note: Running as root is simpler but less secure than using a non-root user
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["./gemini-wrapper"]

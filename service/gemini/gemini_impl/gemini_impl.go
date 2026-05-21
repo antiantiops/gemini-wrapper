@@ -1,6 +1,7 @@
 package gemini_impl
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -440,16 +441,43 @@ func parseEnvSeconds(key string, defaultSeconds int) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+func readKeyringEnvFile(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	vars := []string{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		line = strings.TrimPrefix(line, "export ")
+		if line == "" || strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		key := strings.TrimSpace(parts[0])
+		value := strings.Trim(strings.TrimSpace(parts[1]), "'\"")
+		if key != "" {
+			vars = append(vars, key+"="+value)
+		}
+	}
+	return vars, scanner.Err()
+}
+
 func (s *GeminiService) askOnce(question string, modelName string) (string, *model.GeminiStatus, error) {
-	// Prepare the command arguments
+	timeout := parseEnvSeconds("ANTIGRAVITY_CLI_TIMEOUT_SECONDS", 120)
+
+	// Antigravity CLI print mode currently returns plain text and does not support
+	// Gemini CLI flags such as --output-format or --model.
 	args := []string{
-		"--prompt", question,
-		"--output-format", "json",
+		"--print-timeout", timeout.String(),
+		"--print", question,
 	}
 
-	// Add model if specified
 	if modelName != "" {
-		args = append(args, "--model", modelName)
+		fmt.Printf("Antigravity CLI does not support per-request model selection; requested model %q will be handled by the CLI default\n", modelName)
 	}
 
 	cliCommand := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CLI_COMMAND"))
@@ -458,11 +486,10 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	}
 	configDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CONFIG_DIR"))
 	if configDir == "" {
-		configDir = "/app/.antigravity"
+		configDir = "/app/.gemini"
 	}
 
-	timeout := parseEnvSeconds("ANTIGRAVITY_CLI_TIMEOUT_SECONDS", 120)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+5*time.Second)
 	defer cancel()
 
 	// Create command
@@ -479,6 +506,9 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 		"ANTIGRAVITY_CONFIG_DIR="+configDir,
 		"XDG_CONFIG_HOME="+homeDir,
 	)
+	if keyringEnv, err := readKeyringEnvFile("/tmp/antigravity-keyring.env"); err == nil {
+		cmd.Env = append(cmd.Env, keyringEnv...)
+	}
 
 	// Run command and capture output
 	output, err := cmd.CombinedOutput()
@@ -495,8 +525,8 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 			return "", status, fmt.Errorf("model not found: the model '%s' doesn't exist or isn't available in Antigravity", modelName)
 		}
 
-		if strings.Contains(outputStr, "authentication") || strings.Contains(outputStr, "auth") {
-			return "", status, fmt.Errorf("authentication error: ensure ANTIGRAVITY_CONFIG_DIR (%s) is mounted and authenticated with Antigravity or Antigravity IDE", configDir)
+		if strings.Contains(outputStr, "authentication") || strings.Contains(outputStr, "auth") || strings.Contains(outputStr, "not logged into Antigravity") {
+			return "", status, fmt.Errorf("authentication error: ensure ANTIGRAVITY_CONFIG_DIR (%s) is mounted and authenticated with Antigravity CLI; in Docker, source /tmp/antigravity-keyring.env before running agy login/print manually", configDir)
 		}
 
 		response, ok := parseGeminiOutput(outputStr)
