@@ -10,8 +10,11 @@ if command -v dbus-launch >/dev/null 2>&1; then
 fi
 
 if command -v gnome-keyring-daemon >/dev/null 2>&1; then
-  keyring_env="$(gnome-keyring-daemon --start --components=secrets 2>/dev/null || true)"
-  if [ -n "${keyring_env}" ]; then
+  keyring_env="$(gnome-keyring-daemon --start --components=secrets)"
+  keyring_status=$?
+  if [ ${keyring_status} -ne 0 ]; then
+    echo "Error: gnome-keyring-daemon failed with exit code ${keyring_status}" >&2
+  elif [ -n "${keyring_env}" ]; then
     eval "${keyring_env}"
     export GNOME_KEYRING_CONTROL SSH_AUTH_SOCK
   fi
