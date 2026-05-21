@@ -506,7 +506,11 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 		"ANTIGRAVITY_CONFIG_DIR="+configDir,
 		"XDG_CONFIG_HOME="+homeDir,
 	)
-	if keyringEnv, err := readKeyringEnvFile("/tmp/antigravity-keyring.env"); err == nil {
+	keyringEnvFile := strings.TrimSpace(os.Getenv("ANTIGRAVITY_KEYRING_ENV_FILE"))
+	if keyringEnvFile == "" {
+		keyringEnvFile = filepath.Join(configDir, "antigravity-cli", "keyring.env")
+	}
+	if keyringEnv, err := readKeyringEnvFile(keyringEnvFile); err == nil {
 		cmd.Env = append(cmd.Env, keyringEnv...)
 	}
 
@@ -526,7 +530,7 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 		}
 
 		if strings.Contains(outputStr, "authentication") || strings.Contains(outputStr, "auth") || strings.Contains(outputStr, "not logged into Antigravity") {
-			return "", status, fmt.Errorf("authentication error: ensure ANTIGRAVITY_CONFIG_DIR (%s) is mounted and authenticated with Antigravity CLI; in Docker, source /tmp/antigravity-keyring.env before running agy login/print manually", configDir)
+			return "", status, fmt.Errorf("authentication error: ensure ANTIGRAVITY_CONFIG_DIR (%s) is mounted and authenticated with Antigravity CLI; in Docker, source %s before running agy login/print manually", configDir, filepath.Join(configDir, "antigravity-cli", "keyring.sh"))
 		}
 
 		response, ok := parseGeminiOutput(outputStr)

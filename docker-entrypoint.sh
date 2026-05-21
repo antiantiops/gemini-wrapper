@@ -26,6 +26,11 @@ if command -v gnome-keyring-daemon >/dev/null 2>&1; then
   printf '\n' | gnome-keyring-daemon --unlock >/dev/null 2>&1 || true
 fi
 
+KEYRING_ENV_DIR="${ANTIGRAVITY_KEYRING_ENV_DIR:-${ANTIGRAVITY_CONFIG_DIR:-${HOME}/.gemini}/antigravity-cli}"
+KEYRING_ENV_FILE="${ANTIGRAVITY_KEYRING_ENV_FILE:-${KEYRING_ENV_DIR}/keyring.env}"
+KEYRING_SHELL_FILE="${ANTIGRAVITY_KEYRING_SHELL_FILE:-${KEYRING_ENV_DIR}/keyring.sh}"
+mkdir -p "${KEYRING_ENV_DIR}"
+
 # Make the same session available to manual `docker exec` login commands and
 # Go subprocesses. The .env file is deliberately plain KEY=VALUE (not shell
 # escaped) so the wrapper can append it directly to exec.CommandContext.Env.
@@ -34,12 +39,12 @@ fi
   [ -n "${DBUS_SESSION_BUS_PID:-}" ] && printf 'DBUS_SESSION_BUS_PID=%s\n' "${DBUS_SESSION_BUS_PID}"
   [ -n "${GNOME_KEYRING_CONTROL:-}" ] && printf 'GNOME_KEYRING_CONTROL=%s\n' "${GNOME_KEYRING_CONTROL}"
   [ -n "${SSH_AUTH_SOCK:-}" ] && printf 'SSH_AUTH_SOCK=%s\n' "${SSH_AUTH_SOCK}"
-} > /tmp/antigravity-keyring.env
-chmod 600 /tmp/antigravity-keyring.env
+} > "${KEYRING_ENV_FILE}"
+chmod 600 "${KEYRING_ENV_FILE}"
 
 # Shell-friendly helper for manual docker exec usage:
-#   . /tmp/antigravity-keyring.sh && agy --print "hello"
-sed 's/^/export /' /tmp/antigravity-keyring.env > /tmp/antigravity-keyring.sh
-chmod 600 /tmp/antigravity-keyring.sh
+#   . /app/.gemini/antigravity-cli/keyring.sh && agy --print "hello"
+sed 's/^/export /' "${KEYRING_ENV_FILE}" > "${KEYRING_SHELL_FILE}"
+chmod 600 "${KEYRING_SHELL_FILE}"
 
 exec "$@"
