@@ -1,6 +1,7 @@
 package gemini_impl
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -460,8 +461,12 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 		configDir = "/app/.antigravity"
 	}
 
+	timeout := parseEnvSeconds("ANTIGRAVITY_CLI_TIMEOUT_SECONDS", 120)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	// Create command
-	cmd := exec.Command(cliCommand, args...)
+	cmd := exec.CommandContext(ctx, cliCommand, args...)
 
 	homeDir := strings.TrimSpace(os.Getenv("HOME"))
 	if homeDir == "" {
@@ -480,13 +485,18 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	outputStr := string(output)
 	status := detectUpstreamStatus(outputStr, nil)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			fmt.Printf("Antigravity CLI timed out after %s (%s); output=%q\n", timeout, cliCommand, outputStr)
+			return "", status, fmt.Errorf("Antigravity CLI timed out after %s", timeout)
+		}
+
 		// Provide helpful error messages for common issues
 		if strings.Contains(outputStr, "ModelNotFoundError") || strings.Contains(outputStr, "not found") {
 			return "", status, fmt.Errorf("model not found: the model '%s' doesn't exist or isn't available in Antigravity", modelName)
 		}
 
 		if strings.Contains(outputStr, "authentication") || strings.Contains(outputStr, "auth") {
-			return "", status, fmt.Errorf("authentication error: make sure ~/.antigravity is mounted correctly and you're authenticated with Antigravity or Antigravity IDE")
+			return "", status, fmt.Errorf("authentication error: ensure ANTIGRAVITY_CONFIG_DIR (%s) is mounted and authenticated with Antigravity or Antigravity IDE", configDir)
 		}
 
 		response, ok := parseGeminiOutput(outputStr)
@@ -506,7 +516,8 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 			}
 		}
 
-		return "", status, fmt.Errorf("failed to execute Antigravity CLI (%s): %v (output: %s)", cliCommand, err, outputStr)
+		fmt.Printf("Antigravity CLI execution failed (%s): %v; output=%q\n", cliCommand, err, outputStr)
+		return "", status, fmt.Errorf("failed to execute Antigravity CLI (%s): %v", cliCommand, err)
 	}
 
 	response, ok := parseGeminiOutput(outputStr)
