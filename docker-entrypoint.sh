@@ -26,14 +26,20 @@ if command -v gnome-keyring-daemon >/dev/null 2>&1; then
   printf '\n' | gnome-keyring-daemon --unlock >/dev/null 2>&1 || true
 fi
 
-# Make the same session available to manual `docker exec` login commands:
-#   . /tmp/antigravity-keyring.env && agy --print "hello"
+# Make the same session available to manual `docker exec` login commands and
+# Go subprocesses. The .env file is deliberately plain KEY=VALUE (not shell
+# escaped) so the wrapper can append it directly to exec.CommandContext.Env.
 {
-  [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] && printf 'export DBUS_SESSION_BUS_ADDRESS=%q\n' "${DBUS_SESSION_BUS_ADDRESS}"
-  [ -n "${DBUS_SESSION_BUS_PID:-}" ] && printf 'export DBUS_SESSION_BUS_PID=%q\n' "${DBUS_SESSION_BUS_PID}"
-  [ -n "${GNOME_KEYRING_CONTROL:-}" ] && printf 'export GNOME_KEYRING_CONTROL=%q\n' "${GNOME_KEYRING_CONTROL}"
-  [ -n "${SSH_AUTH_SOCK:-}" ] && printf 'export SSH_AUTH_SOCK=%q\n' "${SSH_AUTH_SOCK}"
+  [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] && printf 'DBUS_SESSION_BUS_ADDRESS=%s\n' "${DBUS_SESSION_BUS_ADDRESS}"
+  [ -n "${DBUS_SESSION_BUS_PID:-}" ] && printf 'DBUS_SESSION_BUS_PID=%s\n' "${DBUS_SESSION_BUS_PID}"
+  [ -n "${GNOME_KEYRING_CONTROL:-}" ] && printf 'GNOME_KEYRING_CONTROL=%s\n' "${GNOME_KEYRING_CONTROL}"
+  [ -n "${SSH_AUTH_SOCK:-}" ] && printf 'SSH_AUTH_SOCK=%s\n' "${SSH_AUTH_SOCK}"
 } > /tmp/antigravity-keyring.env
 chmod 600 /tmp/antigravity-keyring.env
+
+# Shell-friendly helper for manual docker exec usage:
+#   . /tmp/antigravity-keyring.sh && agy --print "hello"
+sed 's/^/export /' /tmp/antigravity-keyring.env > /tmp/antigravity-keyring.sh
+chmod 600 /tmp/antigravity-keyring.sh
 
 exec "$@"
