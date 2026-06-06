@@ -86,6 +86,32 @@ func TestBuildAttemptModelsSkipsDuplicatePrimary(t *testing.T) {
 	}
 }
 
+func TestResolveModelName(t *testing.T) {
+	cases := []struct {
+		name         string
+		input        string
+		want         string
+		wantHasModel bool
+	}{
+		{"empty omits model", "", "", false},
+		{"sentinel omits model", defaultModelSentinel, "", false},
+		{"exact display name", "Claude Opus 4.6 (Thinking)", "Claude Opus 4.6 (Thinking)", true},
+		{"case-insensitive display name", "claude opus 4.6 (thinking)", "Claude Opus 4.6 (Thinking)", true},
+		{"alias", "claude-opus-4.6", "Claude Opus 4.6 (Thinking)", true},
+		{"alias gpt-oss", "gpt-oss", "GPT-OSS 120B (Medium)", true},
+		{"unknown forwarded as-is", "totally-made-up", "totally-made-up", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, hasModel := resolveModelName(tc.input)
+			if hasModel != tc.wantHasModel || got != tc.want {
+				t.Fatalf("resolveModelName(%q) = (%q, %v), want (%q, %v)", tc.input, got, hasModel, tc.want, tc.wantHasModel)
+			}
+		})
+	}
+}
+
 func TestBuildCacheKeyIncludesModel(t *testing.T) {
 	svc := &GeminiService{}
 	k1 := svc.buildCacheKey("hello", "gemini-a")

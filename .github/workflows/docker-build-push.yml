@@ -50,8 +50,6 @@ jobs:
             type=semver,pattern={{major}}
             # Branch name for branch pushes (e.g., master, develop)
             type=ref,event=branch
-            # PR number for pull request builds (e.g., pr-123)
-            type=ref,event=pr
             # SHA for branch commits only (e.g., master-5a554ab)
             # Only enabled for branch events (not tags)
             type=sha,prefix=sha-,event=branch

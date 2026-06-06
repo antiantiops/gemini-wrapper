@@ -10,10 +10,10 @@ import (
 )
 
 type API struct {
-	Echo               *echo.Echo
+	Echo              *echo.Echo
 	AntigravityHandler *handler.AntigravityHandler
-	OpenAIHandler      *handler.OpenAIHandler
-	OpenAIAPIKey       string
+	OpenAIHandler     *handler.OpenAIHandler
+	OpenAIAPIKey      string
 }
 
 func (api *API) SetupRouter() {

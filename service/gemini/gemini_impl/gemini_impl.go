@@ -1,7 +1,6 @@
 package gemini_impl
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -446,29 +445,62 @@ func parseEnvSeconds(key string, defaultSeconds int) time.Duration {
 // as --model; instead we let agy fall back to its own session default.
 const defaultModelSentinel = "antigravity-default"
 
-func readKeyringEnvFile(path string) ([]string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
+// knownAgyModels are the exact display names accepted by `agy --model` in
+// 1.0.6 (see `agy models`). Matching is case-insensitive against the canonical
+// name as well as a set of convenience aliases.
+var knownAgyModels = []string{
+	"Gemini 3.5 Flash (Medium)",
+	"Gemini 3.5 Flash (High)",
+	"Gemini 3.5 Flash (Low)",
+	"Gemini 3.1 Pro (Low)",
+	"Gemini 3.1 Pro (High)",
+	"Claude Sonnet 4.6 (Thinking)",
+	"Claude Opus 4.6 (Thinking)",
+	"GPT-OSS 120B (Medium)",
+}
 
-	vars := []string{}
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		line = strings.TrimPrefix(line, "export ")
-		if line == "" || strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
-			continue
-		}
-		parts := strings.SplitN(line, "=", 2)
-		key := strings.TrimSpace(parts[0])
-		value := strings.Trim(strings.TrimSpace(parts[1]), "'\"")
-		if key != "" {
-			vars = append(vars, key+"="+value)
+// modelAliases maps lower-cased convenience names to a canonical agy model.
+// agy silently falls back to its default model when given an unknown name, so
+// resolving aliases here prevents callers from silently getting the wrong model.
+var modelAliases = map[string]string{
+	"gemini-3.5-flash":  "Gemini 3.5 Flash (Medium)",
+	"gemini-flash":      "Gemini 3.5 Flash (Medium)",
+	"gemini-3.1-pro":    "Gemini 3.1 Pro (High)",
+	"gemini-pro":        "Gemini 3.1 Pro (High)",
+	"claude-sonnet-4.6": "Claude Sonnet 4.6 (Thinking)",
+	"claude-sonnet":     "Claude Sonnet 4.6 (Thinking)",
+	"claude-opus-4.6":   "Claude Opus 4.6 (Thinking)",
+	"claude-opus":       "Claude Opus 4.6 (Thinking)",
+	"gpt-oss-120b":      "GPT-OSS 120B (Medium)",
+	"gpt-oss":           "GPT-OSS 120B (Medium)",
+}
+
+// resolveModelName maps a caller-supplied model name to an exact agy display
+// name. It returns (resolved, true) when the input matches a known model or
+// alias, and ("", false) for the empty/sentinel default (meaning: omit --model
+// and let agy use its session default).
+func resolveModelName(modelName string) (string, bool) {
+	trimmed := strings.TrimSpace(modelName)
+	if trimmed == "" || trimmed == defaultModelSentinel {
+		return "", false
+	}
+
+	// Exact (case-insensitive) match against canonical display names.
+	for _, known := range knownAgyModels {
+		if strings.EqualFold(trimmed, known) {
+			return known, true
 		}
 	}
-	return vars, scanner.Err()
+
+	// Alias match.
+	if canonical, ok := modelAliases[strings.ToLower(trimmed)]; ok {
+		return canonical, true
+	}
+
+	// Unknown name: forward as-is so the user sees agy's own behaviour rather
+	// than us silently swallowing it. We still warn since agy may fall back.
+	fmt.Printf("Warning: unknown model %q; forwarding to agy as-is (it may fall back to its default)\n", trimmed)
+	return trimmed, true
 }
 
 func (s *GeminiService) askOnce(question string, modelName string) (string, *model.GeminiStatus, error) {
@@ -482,8 +514,8 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 
 	// Add model only when a real model was requested. Skip the empty value and
 	// the "antigravity-default" sentinel, both of which would be rejected by agy.
-	if modelName != "" && modelName != defaultModelSentinel {
-		args = append(args, "--model", modelName)
+	if resolved, ok := resolveModelName(modelName); ok {
+		args = append(args, "--model", resolved)
 	}
 
 	// Auto-approve tool permission prompts so headless invocations don't block
@@ -498,7 +530,7 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	}
 	configDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CONFIG_DIR"))
 	if configDir == "" {
-		configDir = "/app/.gemini"
+		configDir = "/app/.antigravity"
 	}
 	homeDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_HOME"))
 	if homeDir == "" {
@@ -507,7 +539,7 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 
 	// Bound the call so a hung CLI (e.g. waiting on auth) can't block forever.
 	timeout := parseEnvSeconds("ANTIGRAVITY_CLI_TIMEOUT_SECONDS", 300)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout+5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	// Create command
@@ -519,13 +551,6 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 		"ANTIGRAVITY_CONFIG_DIR="+configDir,
 		"XDG_CONFIG_HOME="+homeDir,
 	)
-	keyringEnvFile := strings.TrimSpace(os.Getenv("ANTIGRAVITY_KEYRING_ENV_FILE"))
-	if keyringEnvFile == "" {
-		keyringEnvFile = filepath.Join(configDir, "antigravity-cli", "keyring.env")
-	}
-	if keyringEnv, err := readKeyringEnvFile(keyringEnvFile); err == nil {
-		cmd.Env = append(cmd.Env, keyringEnv...)
-	}
 
 	// Run command and capture output
 	output, err := cmd.CombinedOutput()
@@ -536,18 +561,13 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	}
 	status := detectUpstreamStatus(outputStr, nil)
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			fmt.Printf("Antigravity CLI timed out after %s (%s); output=%q\n", timeout, cliCommand, outputStr)
-			return "", status, fmt.Errorf("Antigravity CLI timed out after %s", timeout)
-		}
-
 		// Provide helpful error messages for common issues
 		if strings.Contains(outputStr, "ModelNotFoundError") || strings.Contains(outputStr, "not found") {
 			return "", status, fmt.Errorf("model not found: the model '%s' doesn't exist or isn't available in Antigravity", modelName)
 		}
 
-		if strings.Contains(outputStr, "authentication") || strings.Contains(outputStr, "auth") || strings.Contains(outputStr, "not logged into Antigravity") {
-			return "", status, fmt.Errorf("authentication error: ensure ANTIGRAVITY_CONFIG_DIR (%s) is mounted and authenticated with Antigravity CLI; in Docker, source %s before running agy login/print manually", configDir, filepath.Join(configDir, "antigravity-cli", "keyring.sh"))
+		if strings.Contains(outputStr, "authentication") || strings.Contains(outputStr, "auth") {
+			return "", status, fmt.Errorf("authentication error: make sure ~/.antigravity is mounted correctly and you're authenticated with Antigravity or Antigravity IDE")
 		}
 
 		response, ok := parseGeminiOutput(outputStr)
@@ -567,8 +587,7 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 			}
 		}
 
-		fmt.Printf("Antigravity CLI execution failed (%s): %v; output=%q\n", cliCommand, err, outputStr)
-		return "", status, fmt.Errorf("failed to execute Antigravity CLI (%s): %v", cliCommand, err)
+		return "", status, fmt.Errorf("failed to execute Antigravity CLI (%s): %v (output: %s)", cliCommand, err, outputStr)
 	}
 
 	response, ok := parseGeminiOutput(outputStr)
