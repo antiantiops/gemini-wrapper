@@ -10,29 +10,32 @@ import (
 	"gemini-wrapper/service/gemini"
 )
 
-type GeminiAdapter struct {
+type AntigravityAdapter struct {
 	geminiService gemini.GeminiService
 }
 
-func NewGeminiAdapter(geminiService gemini.GeminiService) *GeminiAdapter {
-	return &GeminiAdapter{geminiService: geminiService}
+func NewAntigravityAdapter(geminiService gemini.GeminiService) *AntigravityAdapter {
+	return &AntigravityAdapter{geminiService: geminiService}
 }
 
-func (a *GeminiAdapter) ListModels() model.OpenAIModelListResponse {
+// NewGeminiAdapter is kept for backward compatibility.
+func NewGeminiAdapter(geminiService gemini.GeminiService) *AntigravityAdapter {
+	return NewAntigravityAdapter(geminiService)
+}
+
+func (a *AntigravityAdapter) ListModels() model.OpenAIModelListResponse {
 	now := time.Now().Unix()
 	return model.OpenAIModelListResponse{
 		Object: "list",
 		Data: []model.OpenAIModel{
-			{ID: "gemini-2.5-flash", Object: "model", Created: now, OwnedBy: "google"},
-			{ID: "gemini-2.5-flash-lite", Object: "model", Created: now, OwnedBy: "google"},
-			{ID: "gemini-2.5-pro", Object: "model", Created: now, OwnedBy: "google"},
+			{ID: "antigravity-default", Object: "model", Created: now, OwnedBy: "antigravity"},
 		},
 	}
 }
 
-func (a *GeminiAdapter) CreateChatCompletion(req model.OpenAIChatCompletionRequest) (model.OpenAIChatCompletionResponse, error) {
+func (a *AntigravityAdapter) CreateChatCompletion(req model.OpenAIChatCompletionRequest) (model.OpenAIChatCompletionResponse, error) {
 	if a.geminiService == nil {
-		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "Gemini backend is not initialized"}
+		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "Antigravity backend is not initialized"}
 	}
 	if len(req.Messages) == 0 {
 		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "messages_required", Message: "messages is required"}
@@ -49,13 +52,13 @@ func (a *GeminiAdapter) CreateChatCompletion(req model.OpenAIChatCompletionReque
 
 	modelName := req.Model
 	if modelName == "" {
-		modelName = "gemini-2.5-flash"
+		modelName = "antigravity-default"
 	}
 
 	prompt := buildPromptFromMessages(req.Messages)
 	answer, status, err := a.geminiService.Ask(prompt, modelName)
 	if err != nil {
-		return model.OpenAIChatCompletionResponse{}, convertGeminiError(err, status)
+		return model.OpenAIChatCompletionResponse{}, convertAntigravityError(err, status)
 	}
 	resolvedModel := modelName
 	if status != nil && strings.TrimSpace(status.Model) != "" {
@@ -89,9 +92,9 @@ func (a *GeminiAdapter) CreateChatCompletion(req model.OpenAIChatCompletionReque
 	}, nil
 }
 
-func (a *GeminiAdapter) CreateCompletion(req model.OpenAICompletionRequest) (model.OpenAICompletionResponse, error) {
+func (a *AntigravityAdapter) CreateCompletion(req model.OpenAICompletionRequest) (model.OpenAICompletionResponse, error) {
 	if a.geminiService == nil {
-		return model.OpenAICompletionResponse{}, &APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "Gemini backend is not initialized"}
+		return model.OpenAICompletionResponse{}, &APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "Antigravity backend is not initialized"}
 	}
 	if req.Stream {
 		return model.OpenAICompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "stream_not_supported", Message: "stream=true is not supported"}
@@ -110,12 +113,12 @@ func (a *GeminiAdapter) CreateCompletion(req model.OpenAICompletionRequest) (mod
 
 	modelName := req.Model
 	if modelName == "" {
-		modelName = "gemini-2.5-flash"
+		modelName = "antigravity-default"
 	}
 
 	answer, status, askErr := a.geminiService.Ask(prompt, modelName)
 	if askErr != nil {
-		return model.OpenAICompletionResponse{}, convertGeminiError(askErr, status)
+		return model.OpenAICompletionResponse{}, convertAntigravityError(askErr, status)
 	}
 	resolvedModel := modelName
 	if status != nil && strings.TrimSpace(status.Model) != "" {
@@ -147,9 +150,9 @@ func (a *GeminiAdapter) CreateCompletion(req model.OpenAICompletionRequest) (mod
 	}, nil
 }
 
-func (a *GeminiAdapter) CreateResponse(req model.OpenAIResponseRequest) (model.OpenAIResponse, error) {
+func (a *AntigravityAdapter) CreateResponse(req model.OpenAIResponseRequest) (model.OpenAIResponse, error) {
 	if a.geminiService == nil {
-		return model.OpenAIResponse{}, &APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "Gemini backend is not initialized"}
+		return model.OpenAIResponse{}, &APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "Antigravity backend is not initialized"}
 	}
 
 	prompt, err := normalizeResponseInput(req.Input)
@@ -162,12 +165,12 @@ func (a *GeminiAdapter) CreateResponse(req model.OpenAIResponseRequest) (model.O
 
 	modelName := req.Model
 	if modelName == "" {
-		modelName = "gemini-2.5-flash"
+		modelName = "antigravity-default"
 	}
 
 	answer, status, askErr := a.geminiService.Ask(prompt, modelName)
 	if askErr != nil {
-		return model.OpenAIResponse{}, convertGeminiError(askErr, status)
+		return model.OpenAIResponse{}, convertAntigravityError(askErr, status)
 	}
 	resolvedModel := modelName
 	if status != nil && strings.TrimSpace(status.Model) != "" {
@@ -325,14 +328,14 @@ func normalizeResponseInputContent(content interface{}) (string, error) {
 	}
 }
 
-func convertGeminiError(err error, status *model.GeminiStatus) error {
+func convertAntigravityError(err error, status *model.GeminiStatus) error {
 	if err == nil {
 		return nil
 	}
 
 	httpStatus := 500
 	errType := "server_error"
-	errCode := "gemini_error"
+	errCode := "antigravity_error"
 	if status != nil {
 		if status.HTTPStatus > 0 {
 			httpStatus = status.HTTPStatus

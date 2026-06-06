@@ -9,16 +9,16 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-type GeminiHandler struct {
+type AntigravityHandler struct {
 	service *gemini_impl.GeminiService
 }
 
-func NewGeminiHandler(service *gemini_impl.GeminiService) *GeminiHandler {
-	return &GeminiHandler{service: service}
+func NewAntigravityHandler(service *gemini_impl.GeminiService) *AntigravityHandler {
+	return &AntigravityHandler{service: service}
 }
 
 // HandleAsk handles POST /api/ask.
-func (g *GeminiHandler) HandleAsk(c *echo.Context) error {
+func (g *AntigravityHandler) HandleAsk(c *echo.Context) error {
 	if g == nil || g.service == nil {
 		return c.JSON(http.StatusInternalServerError, model.AskResponse{Error: "service not initialized"})
 	}
@@ -42,7 +42,7 @@ func (g *GeminiHandler) HandleAsk(c *echo.Context) error {
 }
 
 // HandleGeminiAPI handles POST /v1beta/models/:model.
-func (g *GeminiHandler) HandleGeminiAPI(c *echo.Context) error {
+func (g *AntigravityHandler) HandleGeminiAPI(c *echo.Context) error {
 	if g == nil || g.service == nil {
 		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"error": map[string]interface{}{

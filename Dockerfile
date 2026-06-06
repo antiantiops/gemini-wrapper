@@ -34,10 +34,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Gemini CLI (has native dependencies that need compilation)
-RUN npm install -g @google/gemini-cli@0.45.2 && \
-  npm list -g --depth=0 @google/gemini-cli && \
-  echo "✓ Gemini CLI installed successfully"
+# Install Antigravity CLI
+# Official Linux install: https://antigravity.google/cli/install.sh
+# Install into /usr/local/bin so `agy` is on PATH for both the build check and
+# at runtime (where HOME=/app, so the script's default ~/.local/bin is unusable).
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin && \
+  /usr/local/bin/agy --version && \
+  echo "✓ Antigravity CLI installed successfully"
 
 # Set up working directory
 WORKDIR /app
@@ -45,7 +48,8 @@ WORKDIR /app
 # Copy the binary from builder
 COPY --from=builder /app/gemini-wrapper .
 
-# Create .gemini directory
+# Create Antigravity config directory
+# Note: agy reads its config/credentials from $HOME/.gemini (HOME=/app here).
 # Running as root to avoid permission issues with mounted volumes
 RUN mkdir -p /app/.gemini
 
@@ -55,7 +59,8 @@ EXPOSE 8080
 # Set environment variables
 ENV PORT=8080
 ENV HOME=/app
-ENV GEMINI_CONFIG_DIR=/app/.gemini
+ENV ANTIGRAVITY_CONFIG_DIR=/app/.gemini
+ENV ANTIGRAVITY_CLI_COMMAND=agy
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

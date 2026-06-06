@@ -10,24 +10,24 @@ import (
 )
 
 type API struct {
-	Echo          *echo.Echo
-	GeminiHandler *handler.GeminiHandler
-	OpenAIHandler *handler.OpenAIHandler
-	OpenAIAPIKey  string
+	Echo              *echo.Echo
+	AntigravityHandler *handler.AntigravityHandler
+	OpenAIHandler     *handler.OpenAIHandler
+	OpenAIAPIKey      string
 }
 
 func (api *API) SetupRouter() {
 	healthHandler := func(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{
-			"message": "Gemini Wrapper API",
+			"message": "Antigravity Wrapper API",
 			"status":  "running",
 		})
 	}
 
 	api.Echo.GET("/", healthHandler)
 	api.Echo.HEAD("/", healthHandler)
-	api.Echo.POST("/api/ask", api.GeminiHandler.HandleAsk)
-	api.Echo.POST("/v1beta/models/:model", api.GeminiHandler.HandleGeminiAPI)
+	api.Echo.POST("/api/ask", api.AntigravityHandler.HandleAsk)
+	api.Echo.POST("/v1beta/models/:model", api.AntigravityHandler.HandleGeminiAPI)
 
 	if api.OpenAIHandler != nil {
 		v1 := api.Echo.Group("/v1")

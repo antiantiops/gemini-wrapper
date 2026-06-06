@@ -4,7 +4,9 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/antiantiops/gemini-wrapper)](https://hub.docker.com/r/antiantiops/gemini-wrapper)
 [![Docker Image Size](https://img.shields.io/docker/image-size/antiantiops/gemini-wrapper/latest)](https://hub.docker.com/r/antiantiops/gemini-wrapper)
 
-A Go REST API wrapper for Google's Gemini CLI. Provides a simple HTTP interface to interact with Gemini AI.
+A Go REST API wrapper for Google's Antigravity CLI (`agy`). Provides a simple HTTP interface (plus OpenAI- and Gemini-compatible endpoints) to interact with Antigravity models.
+
+> Backend: this image ships the **Antigravity CLI (`agy`)**, tested against **agy 1.0.6**. The wrapper invokes `agy --prompt "<question>"` (optionally with `--model`) in headless mode and returns the response.
 
 🐳 **Pre-built Docker images**: https://hub.docker.com/r/antiantiops/gemini-wrapper
 
@@ -12,29 +14,27 @@ A Go REST API wrapper for Google's Gemini CLI. Provides a simple HTTP interface 
 
 ## 🚨 READ THIS FIRST
 
-### You Do NOT Need to Install Gemini CLI on Your Computer!
+### You Do NOT Need to Install the Antigravity CLI on Your Computer!
 
 **❌ WRONG (Traditional Method):**
 ```bash
 # DON'T DO THIS - You don't need to install on localhost!
-npm install -g @google/gemini-cli
-gemini
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+agy
 ```
 
 **✅ CORRECT (Our Method):**
 ```bash
-# Just start the container - Gemini CLI is already inside!
+# Just start the container - the Antigravity CLI (agy) is already inside!
 docker run -d -p 8080:8080 -v ~/.gemini:/app/.gemini --name gemini-wrapper antiantiops/gemini-wrapper:latest
 
 # Then authenticate INSIDE the container
-docker exec -it gemini-wrapper sh -c 'gemini'
-# Select "1. Login with Google" (NOT API Key!)
+docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CONFIG_DIR=/app/.gemini && cd /app && agy'
 ```
 
 **Why our method is better:**
 - ✅ No Node.js installation on your computer
-- ✅ No npm packages on your computer  
-- ✅ No Gemini CLI installation on your computer
+- ✅ No Antigravity CLI installation on your computer
 - ✅ Everything isolated in Docker
 - ✅ Only Docker required
 
@@ -45,34 +45,48 @@ docker exec -it gemini-wrapper sh -c 'gemini'
 **You do NOT need to install anything on your computer except Docker!**
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    YOUR COMPUTER (Host)                      │
-│                                                              │
-│  1. Create empty folder: ~/.gemini                          │
-│  2. Run Docker container with mount                         │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+### Step 1:
+agy
+
+###Step 2: Choose Google Oauth
+
+     ▄▀▀▄
+    ▀▀▀▀▀▀
+   ▀▀▀▀▀▀▀▀
+  ▄▀▀    ▀▀▄
+ ▄▀▀      ▀▀▄
+
+ Welcome to the Antigravity CLI. You are currently not signed in.
+
+ Select login method:
+ > 1. Google OAuth
+   2. Use a Google Cloud project
+
+ [Use arrow keys to navigate, Enter to select]
+
+
+### Step 3: get out of the container
+
                            ↓ Mount
 ┌─────────────────────────────────────────────────────────────┐
 │                   DOCKER CONTAINER                           │
 │                                                              │
-│  • Gemini CLI pre-installed ✅                               │
+│  • Antigravity CLI (agy) pre-installed ✅                    │
 │  • Node.js pre-installed ✅                                  │
 │  • Go application pre-installed ✅                           │
 │                                                              │
-│  3. You run: gemini (inside container)                      │
-│  4. Select "1. Login with Google"                           │
-│  5. Authenticate via browser OAuth                          │
-│  6. Credentials saved to /app/.gemini                       │
+│  3. You run: agy (inside container)                         │
+│  4. Complete the Antigravity sign-in flow                   │
+│  5. Credentials saved to /app/.gemini                       │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
                            ↓ Mount (bidirectional)
 ┌─────────────────────────────────────────────────────────────┐
 │                    YOUR COMPUTER (Host)                      │
 │                                                              │
-│  7. Credentials appear in: ~/.gemini ✅                      │
-│  8. Container can now access Google Gemini API ✅            │
-│  9. Your REST API is ready! ✅                               │
+│  6. Credentials appear in: ~/.gemini ✅                      │
+│  7. Container can now access Antigravity ✅                  │
+│  8. Your REST API is ready! ✅                               │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -80,7 +94,6 @@ docker exec -it gemini-wrapper sh -c 'gemini'
 **Key Points:**
 - ✅ **No localhost installation** - Everything runs in Docker
 - ✅ **Authenticate in container** - Not on your computer
-- ✅ **Must use "Login with Google"** - API Key option won't work
 - ✅ **Credentials shared via mount** - Saved to both container and host
 
 ---
@@ -93,8 +106,7 @@ docker exec -it gemini-wrapper sh -c 'gemini'
 
 **❌ You do NOT need to:**
 - Install Node.js on your computer
-- Install Gemini CLI on your computer
-- Install npm on your computer
+- Install the Antigravity CLI on your computer
 
 **Everything is already inside the Docker container!**
 
@@ -142,48 +154,33 @@ docker run -d -p 8080:8080 `
 
 **Important:** You authenticate **INSIDE the running Docker container**, not on your computer.
 
-Run this command to enter the container and start authentication:
+Run this command to enter the container and start the Antigravity sign-in flow:
 
 ```bash
-docker exec -it gemini-wrapper sh -c 'export HOME=/app && export GEMINI_CONFIG_DIR=/app/.gemini && cd /app && gemini'
+docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CONFIG_DIR=/app/.gemini && cd /app && agy'
 ```
 
-**You'll see this menu:**
+Follow the on-screen prompts from `agy` to sign in. When the CLI shows a URL:
 
-```
-How would you like to authenticate for this project?
+1. **Copy the entire URL** it prints
+2. **Open it in your browser** (on your host computer)
+3. **Sign in** and grant permissions
+4. **Copy the authorization code** the browser shows
+5. **Go back to the container terminal** and paste the code
+6. **Press Enter** until the CLI confirms you are signed in
 
-  ● 1. Login with Google         ← Type "1" and press Enter
-    2. Use Gemini API Key         ← DO NOT select this
-    3. Vertex AI                  ← DO NOT select this
-
-No authentication method selected.
-```
-
-⚠️ **CRITICAL: You MUST type `1` and press Enter**
-
-**Why "Login with Google" only?**
-- ✅ Option 1 (Login with Google) - Works with this project
-- ❌ Option 2 (Gemini API Key) - Will NOT work
-- ❌ Option 3 (Vertex AI) - For enterprise Google Cloud only
-
-**After selecting "1", follow these steps:**
-
-1. Terminal shows a long URL: `https://accounts.google.com/o/oauth2/v2/auth?...`
-2. **Copy the entire URL**
-3. **Open it in your browser** (on your host computer)
-4. **Sign in with Google** and grant permissions
-5. Browser shows an authorization code
-6. **Copy the authorization code**
-7. **Go back to the container terminal** and paste the code
-8. **Press Enter**
-9. You'll see "Authentication successful!" ✓
+> Note: the exact sign-in prompts depend on your `agy` version. This image is tested with **agy 1.0.6** — run `agy --help` and `agy install` inside the container if you need to (re)configure environment paths.
 
 **What happened:**
 - You authenticated inside the container
 - Credentials were saved to `/app/.gemini` (inside container)
 - Because `/app/.gemini` is mounted to `~/.gemini` (on your computer)
 - The credentials are now available on both your computer AND in the container
+
+Verify the CLI works headlessly:
+```bash
+docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CONFIG_DIR=/app/.gemini && agy --prompt "What model are you? One sentence."'
+```
 
 **Restart the container:**
 ```bash
@@ -207,7 +204,7 @@ curl -X POST http://localhost:8080/api/ask \
 }
 ```
 
-**✅ That's it! Your Gemini API is ready to use.**
+**✅ That's it! Your Antigravity API is ready to use.**
 
 ---
 
@@ -217,26 +214,23 @@ curl -X POST http://localhost:8080/api/ask \
 
 1. ✅ Created empty folder: `~/.gemini` on your computer
 2. ✅ Started Docker container with folder mounted
-3. ✅ Ran `gemini` command **INSIDE the container** (not on your computer!)
-4. ✅ Selected **"1. Login with Google"** (not API Key!)
-5. ✅ Authenticated via browser OAuth
-6. ✅ Credentials saved to container's `/app/.gemini`
-7. ✅ Credentials automatically appear in your `~/.gemini` (via mount)
-8. ✅ Restarted container
-9. ✅ API is now working!
+3. ✅ Ran `agy` command **INSIDE the container** (not on your computer!)
+4. ✅ Completed the Antigravity sign-in flow
+5. ✅ Credentials saved to container's `/app/.gemini`
+6. ✅ Credentials automatically appear in your `~/.gemini` (via mount)
+7. ✅ Restarted container
+8. ✅ API is now working!
 
 ### What You Did NOT Do:
 
 - ❌ Install Node.js on your computer
-- ❌ Install npm on your computer
-- ❌ Install Gemini CLI on your computer (`npm install -g @google/gemini-cli`)
-- ❌ Run `gemini` command on your computer
-- ❌ Use "Gemini API Key" option
+- ❌ Install the Antigravity CLI on your computer (`agy`)
+- ❌ Run `agy` command on your computer
 
 ### Why This Approach?
 
 **Everything happens inside Docker:**
-- Gemini CLI is already installed in the container
+- The Antigravity CLI (`agy`) is already installed in the container
 - You authenticate inside the container
 - Credentials are shared between container and host via mount
 - Your computer stays clean (no extra installations)
@@ -258,7 +252,7 @@ curl -X POST http://localhost:8080/api/ask \
   -H "Content-Type: application/json" \
   -d '{
     "question": "Explain quantum computing",
-    "model": "gemini-2.5-flash"
+    "model": "Gemini 3.5 Flash (Medium)"
   }'
 ```
 
@@ -272,7 +266,7 @@ curl -X POST http://localhost:8080/api/ask \
 ### Gemini API Compatible Format
 
 ```bash
-curl -X POST http://localhost:8080/v1beta/models/gemini-2.5-flash \
+curl -X POST "http://localhost:8080/v1beta/models/Gemini%203.5%20Flash%20(Medium)" \
   -H "Content-Type: application/json" \
   -d '{
     "contents": [
@@ -288,7 +282,7 @@ curl -X POST http://localhost:8080/v1beta/models/gemini-2.5-flash \
 **Response:**
 ```json
 {
-  "model": "gemini-2.5-flash",
+  "model": "Gemini 3.5 Flash (Medium)",
   "candidates": [
     {
       "content": {
@@ -305,11 +299,12 @@ curl -X POST http://localhost:8080/v1beta/models/gemini-2.5-flash \
 
 ## OpenAI-Compatible API
 
-This backend exposes OpenAI-compatible endpoints and forwards generation traffic to Gemini CLI:
+This backend exposes OpenAI-compatible endpoints and forwards generation traffic to the Antigravity CLI (`agy`):
 
 - `GET /v1/models`
 - `POST /v1/chat/completions`
 - `POST /v1/completions`
+- `POST /v1/responses`
 
 ### OpenAI-Compatible Authentication (OPENAI_API_KEY)
 
@@ -320,10 +315,10 @@ Authentication behavior for `/v1/*` depends on container environment:
 
 ### Optional model fallback (`FALLBACK_MODEL`)
 
-You can configure fallback models for capacity/rate-limit errors (for example when `gemini-3.1-pro-preview` is exhausted):
+You can configure fallback models for capacity/rate-limit errors (for example when a Pro model is exhausted):
 
-- Supports bracket list: `FALLBACK_MODEL=[gemini-2.5-flash,gemini-2.5-flash-lite]`
-- Supports comma-separated list: `FALLBACK_MODEL=gemini-2.5-flash,gemini-2.5-flash-lite`
+- Supports bracket list: `FALLBACK_MODEL=[Gemini 3.5 Flash (Medium),Gemini 3.5 Flash (Low)]`
+- Supports comma-separated list: `FALLBACK_MODEL=Gemini 3.5 Flash (Medium),Gemini 3.5 Flash (Low)`
 - Retry happens in listed order.
 - On successful fallback, logs show the fallback attempt and success model.
 - OpenAI-compatible responses return the actual `model` used after fallback.
@@ -335,7 +330,7 @@ docker rm -f gemini-wrapper
 docker run -d -p 8080:8080 \
   -v ~/.gemini:/app/.gemini \
   -e OPENAI_API_KEY=sk-local-demo \
-  -e FALLBACK_MODEL=gemini-2.5-flash,gemini-2.5-flash-lite \
+  -e "FALLBACK_MODEL=Gemini 3.5 Flash (Medium),Gemini 3.5 Flash (Low)" \
   --name gemini-wrapper \
   antiantiops/gemini-wrapper:latest
 ```
@@ -347,7 +342,7 @@ docker rm -f gemini-wrapper
 docker run -d -p 8080:8080 `
   -v ${env:USERPROFILE}\.gemini:/app/.gemini `
   -e OPENAI_API_KEY=sk-local-demo `
-  -e FALLBACK_MODEL=gemini-2.5-flash,gemini-2.5-flash-lite `
+  -e "FALLBACK_MODEL=Gemini 3.5 Flash (Medium),Gemini 3.5 Flash (Low)" `
   --name gemini-wrapper `
   antiantiops/gemini-wrapper:latest
 ```
@@ -364,7 +359,7 @@ curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-local-demo" \
   -d '{
-    "model": "gemini-2.5-flash",
+    "model": "Gemini 3.5 Flash (Medium)",
     "messages": [
       {"role": "user", "content": "Hello"}
     ]
@@ -377,30 +372,67 @@ If `OPENAI_API_KEY` is not set, you can remove the `Authorization` header.
 
 ## 🎯 Available Models
 
-| Model | Speed | Quality | Best For | Cost |
-|-------|-------|---------|----------|------|
-| `gemini-2.5-flash-lite` | ⚡⚡⚡ Fastest | ⭐⭐ Good | Quick answers, chat | Lowest |
-| `gemini-2.5-flash` | ⚡⚡ Fast | ⭐⭐⭐ Great | Most tasks (default) | Low |
-| `gemini-2.5-pro` | ⚡ Slower | ⭐⭐⭐⭐ Best | Complex tasks, research | Higher |
+These are the exact model names accepted by `agy 1.0.6` (run `agy models` inside the container to confirm for your version):
+
+| Model (`agy` display name) | Notes |
+|----------------------------|-------|
+| `Gemini 3.5 Flash (Medium)` | Balanced Flash tier |
+| `Gemini 3.5 Flash (High)` | Higher-effort Flash |
+| `Gemini 3.5 Flash (Low)` | Fastest / cheapest Flash |
+| `Gemini 3.1 Pro (Low)` | Pro, lower effort |
+| `Gemini 3.1 Pro (High)` | Pro, highest quality |
+| `Claude Sonnet 4.6 (Thinking)` | Anthropic Sonnet |
+| `Claude Opus 4.6 (Thinking)` | Anthropic Opus |
+| `GPT-OSS 120B (Medium)` | Open-weight GPT-OSS |
+
+> ⚠️ `agy` silently falls back to its default model when given an unknown name. To avoid surprises, the wrapper resolves a set of convenience **aliases** to the exact display names above, and forwards anything unrecognized as-is (with a warning in the logs).
+
+### Model aliases
+
+| Alias | Resolves to |
+|-------|-------------|
+| `gemini-3.5-flash`, `gemini-flash` | `Gemini 3.5 Flash (Medium)` |
+| `gemini-3.1-pro`, `gemini-pro` | `Gemini 3.1 Pro (High)` |
+| `claude-sonnet-4.6`, `claude-sonnet` | `Claude Sonnet 4.6 (Thinking)` |
+| `claude-opus-4.6`, `claude-opus` | `Claude Opus 4.6 (Thinking)` |
+| `gpt-oss-120b`, `gpt-oss` | `GPT-OSS 120B (Medium)` |
+
+If you omit `model` (or send `antigravity-default`), the wrapper does **not** pass `--model` and lets `agy` use its session default.
 
 **Examples:**
 
 ```bash
-# Fast and cheap (flash-lite)
+# Use a Flash tier
 curl -X POST http://localhost:8080/api/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "Hi!", "model": "gemini-2.5-flash-lite"}'
+  -d '{"question": "Hi!", "model": "Gemini 3.5 Flash (Low)"}'
 
-# Balanced (flash) - DEFAULT if you don't specify model
+# Default (no model) - agy picks its session default
 curl -X POST http://localhost:8080/api/ask \
   -H "Content-Type: application/json" \
   -d '{"question": "Explain Docker"}'
 
-# High quality (pro)
+# High quality via alias
 curl -X POST http://localhost:8080/api/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "Write a research paper on AI", "model": "gemini-2.5-pro"}'
+  -d '{"question": "Write a research outline on AI", "model": "claude-opus"}'
 ```
+
+---
+
+## Antigravity CLI Configuration
+
+The wrapper invokes the Antigravity CLI in headless mode. These environment variables control how it is called:
+
+- `ANTIGRAVITY_CLI_COMMAND` (default `agy`) — the CLI binary to execute.
+- `ANTIGRAVITY_CONFIG_DIR` (default `/app/.gemini`) — config/credentials dir, exported as `ANTIGRAVITY_CONFIG_DIR` to the CLI. This is where `agy` stores its OAuth credentials (`oauth_creds.json`, `antigravity-cli/`, etc.), so it must be the mounted volume.
+- `ANTIGRAVITY_HOME` (default `/app`) — value used for `HOME` and `XDG_CONFIG_HOME` when invoking the CLI. Set this when running outside Docker.
+- `ANTIGRAVITY_CLI_TIMEOUT_SECONDS` (default `300`) — hard timeout for a single CLI call; prevents a hung process from blocking requests.
+- `ANTIGRAVITY_SKIP_PERMISSIONS` (default `false`) — when truthy, passes `--dangerously-skip-permissions` so tool-permission prompts are auto-approved (avoids blocking on stdin). Security sensitive: only enable for trusted, headless use.
+
+> Notes:
+> - `agy 1.0.6` does not support an `--output-format` flag; the wrapper parses plain-text output (and JSON when present).
+> - The wrapper calls `agy --prompt "<question>"` and adds `--model "<resolved name>"` only when a recognized model/alias is supplied.
 
 ---
 
@@ -446,4 +478,4 @@ docker run -d -p 8080:8080 \
   antiantiops/gemini-wrapper:latest
 ```
 
-**Made with ❤️ using Go, Echo, and Google's Gemini CLI**
+**Made with ❤️ using Go, Echo, and Google's Antigravity CLI (`agy`)**
