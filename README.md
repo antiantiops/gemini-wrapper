@@ -4,7 +4,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/antiantiops/gemini-wrapper)](https://hub.docker.com/r/antiantiops/gemini-wrapper)
 [![Docker Image Size](https://img.shields.io/docker/image-size/antiantiops/gemini-wrapper/latest)](https://hub.docker.com/r/antiantiops/gemini-wrapper)
 
-A Go REST API wrapper for Google's Gemini CLI. Provides a simple HTTP interface to interact with Gemini AI.
+A Go REST API wrapper for the Antigravity CLI (`agy`). Provides a simple HTTP interface to interact with Antigravity, plus OpenAI- and Gemini-compatible endpoints.
 
 🐳 **Pre-built Docker images**: https://hub.docker.com/r/antiantiops/gemini-wrapper
 
@@ -12,29 +12,27 @@ A Go REST API wrapper for Google's Gemini CLI. Provides a simple HTTP interface 
 
 ## 🚨 READ THIS FIRST
 
-### You Do NOT Need to Install Gemini CLI on Your Computer!
+### You Do NOT Need to Install the Antigravity CLI on Your Computer!
 
 **❌ WRONG (Traditional Method):**
 ```bash
-# DON'T DO THIS - You don't need to install on localhost!
-npm install -g @google/gemini-cli
-gemini
+# DON'T DO THIS - You don't need to install anything on localhost!
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+agy
 ```
 
 **✅ CORRECT (Our Method):**
 ```bash
-# Just start the container - Gemini CLI is already inside!
+# Just start the container - the Antigravity CLI is already inside!
 docker run -d -p 8080:8080 -v ~/.gemini:/app/.gemini --name gemini-wrapper antiantiops/gemini-wrapper:latest
 
-# Then authenticate INSIDE the container
-docker exec -it gemini-wrapper sh -c 'gemini'
-# Select "1. Login with Google" (NOT API Key!)
+# Then authenticate INSIDE the container (loads the container keyring first)
+docker exec -it gemini-wrapper bash -lc '. /app/.gemini/antigravity-cli/keyring.sh && agy login'
 ```
 
 **Why our method is better:**
 - ✅ No Node.js installation on your computer
-- ✅ No npm packages on your computer  
-- ✅ No Gemini CLI installation on your computer
+- ✅ No Antigravity CLI installation on your computer
 - ✅ Everything isolated in Docker
 - ✅ Only Docker required
 
@@ -56,14 +54,14 @@ docker exec -it gemini-wrapper sh -c 'gemini'
 ┌─────────────────────────────────────────────────────────────┐
 │                   DOCKER CONTAINER                           │
 │                                                              │
-│  • Gemini CLI pre-installed ✅                               │
-│  • Node.js pre-installed ✅                                  │
+│  • Antigravity CLI (agy) pre-installed ✅                    │
+│  • gnome-keyring / DBus session pre-configured ✅            │
 │  • Go application pre-installed ✅                           │
 │                                                              │
-│  3. You run: gemini (inside container)                      │
-│  4. Select "1. Login with Google"                           │
-│  5. Authenticate via browser OAuth                          │
-│  6. Credentials saved to /app/.gemini                       │
+│  3. You run: agy login (inside container)                   │
+│  4. Authenticate via browser OAuth                          │
+│  5. Tokens stored in the container keyring                  │
+│  6. Session credentials saved to /app/.gemini               │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
                            ↓ Mount (bidirectional)
@@ -71,7 +69,7 @@ docker exec -it gemini-wrapper sh -c 'gemini'
 │                    YOUR COMPUTER (Host)                      │
 │                                                              │
 │  7. Credentials appear in: ~/.gemini ✅                      │
-│  8. Container can now access Google Gemini API ✅            │
+│  8. Container can now reach Antigravity ✅                   │
 │  9. Your REST API is ready! ✅                               │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
@@ -80,7 +78,7 @@ docker exec -it gemini-wrapper sh -c 'gemini'
 **Key Points:**
 - ✅ **No localhost installation** - Everything runs in Docker
 - ✅ **Authenticate in container** - Not on your computer
-- ✅ **Must use "Login with Google"** - API Key option won't work
+- ✅ **Load the keyring helper first** - `. /app/.gemini/antigravity-cli/keyring.sh`
 - ✅ **Credentials shared via mount** - Saved to both container and host
 
 ---
@@ -93,7 +91,7 @@ docker exec -it gemini-wrapper sh -c 'gemini'
 
 **❌ You do NOT need to:**
 - Install Node.js on your computer
-- Install Gemini CLI on your computer
+- Install the Antigravity CLI on your computer
 - Install npm on your computer
 
 **Everything is already inside the Docker container!**
@@ -142,57 +140,62 @@ docker run -d -p 8080:8080 `
 
 **Important:** You authenticate **INSIDE the running Docker container**, not on your computer.
 
-Run this command to enter the container and start authentication:
+The container's entrypoint starts a DBus session and unlocks a `gnome-keyring`
+collection for the Antigravity CLI, then writes a helper file so manual logins
+share the same session. **You must source that helper before running `agy`:**
 
 ```bash
-docker exec -it gemini-wrapper sh -c 'export HOME=/app && export GEMINI_CONFIG_DIR=/app/.gemini && cd /app && gemini'
+docker exec -it gemini-wrapper bash -lc '. /app/.gemini/antigravity-cli/keyring.sh && agy login'
 ```
 
-**You'll see this menu:**
+**Then follow the on-screen OAuth flow:**
 
-```
-How would you like to authenticate for this project?
-
-  ● 1. Login with Google         ← Type "1" and press Enter
-    2. Use Gemini API Key         ← DO NOT select this
-    3. Vertex AI                  ← DO NOT select this
-
-No authentication method selected.
-```
-
-⚠️ **CRITICAL: You MUST type `1` and press Enter**
-
-**Why "Login with Google" only?**
-- ✅ Option 1 (Login with Google) - Works with this project
-- ❌ Option 2 (Gemini API Key) - Will NOT work
-- ❌ Option 3 (Vertex AI) - For enterprise Google Cloud only
-
-**After selecting "1", follow these steps:**
-
-1. Terminal shows a long URL: `https://accounts.google.com/o/oauth2/v2/auth?...`
+1. The terminal prints a long URL: `https://accounts.google.com/o/oauth2/v2/auth?...`
 2. **Copy the entire URL**
 3. **Open it in your browser** (on your host computer)
 4. **Sign in with Google** and grant permissions
-5. Browser shows an authorization code
+5. The browser shows an authorization code (or redirects back)
 6. **Copy the authorization code**
-7. **Go back to the container terminal** and paste the code
-8. **Press Enter**
-9. You'll see "Authentication successful!" ✓
+7. **Go back to the container terminal** and paste it, then press **Enter**
+8. You'll see a success message confirming you're logged in ✓
+
+**Verify the login worked:**
+
+```bash
+docker exec -it gemini-wrapper bash -lc '. /app/.gemini/antigravity-cli/keyring.sh && agy --prompt "ping"'
+```
 
 **What happened:**
-- You authenticated inside the container
-- Credentials were saved to `/app/.gemini` (inside container)
-- Because `/app/.gemini` is mounted to `~/.gemini` (on your computer)
-- The credentials are now available on both your computer AND in the container
+- You authenticated inside the container using the Antigravity CLI (`agy`)
+- OAuth tokens were stored in the container keyring
+- Session credentials were written under `/app/.gemini`
+- Because `/app/.gemini` is mounted to `~/.gemini` (on your computer), the
+  credentials are available on both your computer AND in the container
 
 **Restart the container:**
 ```bash
 docker restart gemini-wrapper
 ```
 
+> 💡 If you see a Secret Service / keyring error, make sure you sourced
+> `/app/.gemini/antigravity-cli/keyring.sh` before running `agy`. That file is
+> regenerated on every container start.
+
 ---
 
 ### Step 3: Test the API
+
+**1. Check the service is up (health endpoint):**
+
+```bash
+curl http://localhost:8080/
+```
+
+```json
+{"message":"Gemini Wrapper API","status":"running"}
+```
+
+**2. Ask a question (simple API):**
 
 ```bash
 curl -X POST http://localhost:8080/api/ask \
@@ -207,7 +210,19 @@ curl -X POST http://localhost:8080/api/ask \
 }
 ```
 
-**✅ That's it! Your Gemini API is ready to use.**
+**Windows (PowerShell)** — use `Invoke-RestMethod` to avoid quoting issues:
+
+```powershell
+Invoke-RestMethod -Uri http://localhost:8080/api/ask -Method Post `
+  -ContentType "application/json" `
+  -Body '{"question": "What is 2+2?"}'
+```
+
+**✅ That's it! Your API is ready to use.**
+
+> 🛟 **Troubleshooting:** if `/api/ask` returns an `authentication error`, the
+> container isn't logged in yet. Re-run Step 2 (`agy login`) and make sure you
+> sourced `keyring.sh` first, then `docker restart gemini-wrapper`.
 
 ---
 
@@ -217,26 +232,24 @@ curl -X POST http://localhost:8080/api/ask \
 
 1. ✅ Created empty folder: `~/.gemini` on your computer
 2. ✅ Started Docker container with folder mounted
-3. ✅ Ran `gemini` command **INSIDE the container** (not on your computer!)
-4. ✅ Selected **"1. Login with Google"** (not API Key!)
-5. ✅ Authenticated via browser OAuth
-6. ✅ Credentials saved to container's `/app/.gemini`
-7. ✅ Credentials automatically appear in your `~/.gemini` (via mount)
-8. ✅ Restarted container
-9. ✅ API is now working!
+3. ✅ Sourced the keyring helper and ran `agy login` **INSIDE the container**
+4. ✅ Authenticated via browser OAuth
+5. ✅ Tokens stored in the container keyring, session saved to `/app/.gemini`
+6. ✅ Credentials automatically appear in your `~/.gemini` (via mount)
+7. ✅ Restarted container
+8. ✅ API is now working!
 
 ### What You Did NOT Do:
 
 - ❌ Install Node.js on your computer
 - ❌ Install npm on your computer
-- ❌ Install Gemini CLI on your computer (`npm install -g @google/gemini-cli`)
-- ❌ Run `gemini` command on your computer
-- ❌ Use "Gemini API Key" option
+- ❌ Install the Antigravity CLI on your computer
+- ❌ Run `agy` on your computer
 
 ### Why This Approach?
 
 **Everything happens inside Docker:**
-- Gemini CLI is already installed in the container
+- The Antigravity CLI is already installed in the container
 - You authenticate inside the container
 - Credentials are shared between container and host via mount
 - Your computer stays clean (no extra installations)
@@ -305,7 +318,7 @@ curl -X POST http://localhost:8080/v1beta/models/gemini-2.5-flash \
 
 ## OpenAI-Compatible API
 
-This backend exposes OpenAI-compatible endpoints and forwards generation traffic to Gemini CLI:
+This backend exposes OpenAI-compatible endpoints and forwards generation traffic to the Antigravity CLI:
 
 - `GET /v1/models`
 - `POST /v1/chat/completions`
@@ -446,4 +459,4 @@ docker run -d -p 8080:8080 \
   antiantiops/gemini-wrapper:latest
 ```
 
-**Made with ❤️ using Go, Echo, and Google's Gemini CLI**
+**Made with ❤️ using Go, Echo, and Google's Antigravity CLI**
