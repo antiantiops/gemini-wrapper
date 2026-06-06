@@ -530,7 +530,7 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	}
 	configDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CONFIG_DIR"))
 	if configDir == "" {
-		configDir = "/app/.antigravity"
+		configDir = "/app/.gemini"
 	}
 	homeDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_HOME"))
 	if homeDir == "" {
@@ -567,7 +567,7 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 		}
 
 		if strings.Contains(outputStr, "authentication") || strings.Contains(outputStr, "auth") {
-			return "", status, fmt.Errorf("authentication error: make sure ~/.antigravity is mounted correctly and you're authenticated with Antigravity or Antigravity IDE")
+			return "", status, fmt.Errorf("authentication error: make sure ~/.gemini is mounted correctly and you're authenticated with Antigravity or Antigravity IDE")
 		}
 
 		response, ok := parseGeminiOutput(outputStr)

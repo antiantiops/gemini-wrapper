@@ -26,10 +26,10 @@ agy
 **✅ CORRECT (Our Method):**
 ```bash
 # Just start the container - the Antigravity CLI (agy) is already inside!
-docker run -d -p 8080:8080 -v ~/.antigravity:/app/.antigravity --name gemini-wrapper antiantiops/gemini-wrapper:latest
+docker run -d -p 8080:8080 -v ~/.gemini:/app/.gemini --name gemini-wrapper antiantiops/gemini-wrapper:latest
 
 # Then authenticate INSIDE the container
-docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CONFIG_DIR=/app/.antigravity && cd /app && agy'
+docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CONFIG_DIR=/app/.gemini && cd /app && agy'
 ```
 
 **Why our method is better:**
@@ -45,13 +45,28 @@ docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CON
 **You do NOT need to install anything on your computer except Docker!**
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    YOUR COMPUTER (Host)                      │
-│                                                              │
-│  1. Create empty folder: ~/.antigravity                     │
-│  2. Run Docker container with mount                         │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+### Step 1:
+agy
+
+###Step 2: Choose Google Oauth
+
+     ▄▀▀▄
+    ▀▀▀▀▀▀
+   ▀▀▀▀▀▀▀▀
+  ▄▀▀    ▀▀▄
+ ▄▀▀      ▀▀▄
+
+ Welcome to the Antigravity CLI. You are currently not signed in.
+
+ Select login method:
+ > 1. Google OAuth
+   2. Use a Google Cloud project
+
+ [Use arrow keys to navigate, Enter to select]
+
+
+### Step 3: get out of the container
+
                            ↓ Mount
 ┌─────────────────────────────────────────────────────────────┐
 │                   DOCKER CONTAINER                           │
@@ -62,14 +77,14 @@ docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CON
 │                                                              │
 │  3. You run: agy (inside container)                         │
 │  4. Complete the Antigravity sign-in flow                   │
-│  5. Credentials saved to /app/.antigravity                  │
+│  5. Credentials saved to /app/.gemini                       │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
                            ↓ Mount (bidirectional)
 ┌─────────────────────────────────────────────────────────────┐
 │                    YOUR COMPUTER (Host)                      │
 │                                                              │
-│  6. Credentials appear in: ~/.antigravity ✅                 │
+│  6. Credentials appear in: ~/.gemini ✅                      │
 │  7. Container can now access Antigravity ✅                  │
 │  8. Your REST API is ready! ✅                               │
 │                                                              │
@@ -104,12 +119,12 @@ docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CON
 **Linux/Mac:**
 ```bash
 # Create empty folder for credentials
-mkdir -p ~/.antigravity
+mkdir -p ~/.gemini
 
 # Start container with mount
 # Add: -e OPENAI_API_KEY=sk-local-demo (optional, enables Bearer auth for /v1/*)
 docker run -d -p 8080:8080 \
-  -v ~/.antigravity:/app/.antigravity \
+  -v ~/.gemini:/app/.gemini \
   --name gemini-wrapper \
   antiantiops/gemini-wrapper:latest
 ```
@@ -117,20 +132,20 @@ docker run -d -p 8080:8080 \
 **Windows (PowerShell):**
 ```powershell
 # Create empty folder for credentials
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.antigravity"
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini"
 
 # Start container with mount
 # Add: -e OPENAI_API_KEY=sk-local-demo (optional, enables Bearer auth for /v1/*)
 docker run -d -p 8080:8080 `
-  -v ${env:USERPROFILE}\.antigravity:/app/.antigravity `
+  -v ${env:USERPROFILE}\.gemini:/app/.gemini `
   --name gemini-wrapper `
   antiantiops/gemini-wrapper:latest
 ```
 
 **What this does:**
-- Creates an empty `~/.antigravity` folder on your computer
+- Creates an empty `~/.gemini` folder on your computer
 - Starts the container
-- Mounts `~/.antigravity` (host) to `/app/.antigravity` (container)
+- Mounts `~/.gemini` (host) to `/app/.gemini` (container)
 - When you authenticate in the container, credentials are saved to both places
 
 ---
@@ -142,7 +157,7 @@ docker run -d -p 8080:8080 `
 Run this command to enter the container and start the Antigravity sign-in flow:
 
 ```bash
-docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CONFIG_DIR=/app/.antigravity && cd /app && agy'
+docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CONFIG_DIR=/app/.gemini && cd /app && agy'
 ```
 
 Follow the on-screen prompts from `agy` to sign in. When the CLI shows a URL:
@@ -158,13 +173,13 @@ Follow the on-screen prompts from `agy` to sign in. When the CLI shows a URL:
 
 **What happened:**
 - You authenticated inside the container
-- Credentials were saved to `/app/.antigravity` (inside container)
-- Because `/app/.antigravity` is mounted to `~/.antigravity` (on your computer)
+- Credentials were saved to `/app/.gemini` (inside container)
+- Because `/app/.gemini` is mounted to `~/.gemini` (on your computer)
 - The credentials are now available on both your computer AND in the container
 
 Verify the CLI works headlessly:
 ```bash
-docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CONFIG_DIR=/app/.antigravity && agy --prompt "What model are you? One sentence."'
+docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CONFIG_DIR=/app/.gemini && agy --prompt "What model are you? One sentence."'
 ```
 
 **Restart the container:**
@@ -197,12 +212,12 @@ curl -X POST http://localhost:8080/api/ask \
 
 ### What You Just Did:
 
-1. ✅ Created empty folder: `~/.antigravity` on your computer
+1. ✅ Created empty folder: `~/.gemini` on your computer
 2. ✅ Started Docker container with folder mounted
 3. ✅ Ran `agy` command **INSIDE the container** (not on your computer!)
 4. ✅ Completed the Antigravity sign-in flow
-5. ✅ Credentials saved to container's `/app/.antigravity`
-6. ✅ Credentials automatically appear in your `~/.antigravity` (via mount)
+5. ✅ Credentials saved to container's `/app/.gemini`
+6. ✅ Credentials automatically appear in your `~/.gemini` (via mount)
 7. ✅ Restarted container
 8. ✅ API is now working!
 
@@ -313,7 +328,7 @@ Run container with OpenAI-compatible API key enabled:
 ```bash
 docker rm -f gemini-wrapper
 docker run -d -p 8080:8080 \
-  -v ~/.antigravity:/app/.antigravity \
+  -v ~/.gemini:/app/.gemini \
   -e OPENAI_API_KEY=sk-local-demo \
   -e "FALLBACK_MODEL=Gemini 3.5 Flash (Medium),Gemini 3.5 Flash (Low)" \
   --name gemini-wrapper \
@@ -325,7 +340,7 @@ Windows (PowerShell):
 ```powershell
 docker rm -f gemini-wrapper
 docker run -d -p 8080:8080 `
-  -v ${env:USERPROFILE}\.antigravity:/app/.antigravity `
+  -v ${env:USERPROFILE}\.gemini:/app/.gemini `
   -e OPENAI_API_KEY=sk-local-demo `
   -e "FALLBACK_MODEL=Gemini 3.5 Flash (Medium),Gemini 3.5 Flash (Low)" `
   --name gemini-wrapper `
@@ -410,7 +425,7 @@ curl -X POST http://localhost:8080/api/ask \
 The wrapper invokes the Antigravity CLI in headless mode. These environment variables control how it is called:
 
 - `ANTIGRAVITY_CLI_COMMAND` (default `agy`) — the CLI binary to execute.
-- `ANTIGRAVITY_CONFIG_DIR` (default `/app/.antigravity`) — config/credentials dir, exported as `ANTIGRAVITY_CONFIG_DIR` to the CLI.
+- `ANTIGRAVITY_CONFIG_DIR` (default `/app/.gemini`) — config/credentials dir, exported as `ANTIGRAVITY_CONFIG_DIR` to the CLI. This is where `agy` stores its OAuth credentials (`oauth_creds.json`, `antigravity-cli/`, etc.), so it must be the mounted volume.
 - `ANTIGRAVITY_HOME` (default `/app`) — value used for `HOME` and `XDG_CONFIG_HOME` when invoking the CLI. Set this when running outside Docker.
 - `ANTIGRAVITY_CLI_TIMEOUT_SECONDS` (default `300`) — hard timeout for a single CLI call; prevents a hung process from blocking requests.
 - `ANTIGRAVITY_SKIP_PERMISSIONS` (default `false`) — when truthy, passes `--dangerously-skip-permissions` so tool-permission prompts are auto-approved (avoids blocking on stdin). Security sensitive: only enable for trusted, headless use.
@@ -450,7 +465,7 @@ Example:
 
 ```bash
 docker run -d -p 8080:8080 \
-  -v ~/.antigravity:/app/.antigravity \
+  -v ~/.gemini:/app/.gemini \
   -v gemini-wrapper-cache:/app/cache \
   -e CACHE_ENABLED=true \
   -e CACHE_TTL_SECONDS=1800 \

@@ -49,8 +49,9 @@ WORKDIR /app
 COPY --from=builder /app/gemini-wrapper .
 
 # Create Antigravity config directory
+# Note: agy reads its config/credentials from $HOME/.gemini (HOME=/app here).
 # Running as root to avoid permission issues with mounted volumes
-RUN mkdir -p /app/.antigravity
+RUN mkdir -p /app/.gemini
 
 # Expose port
 EXPOSE 8080
@@ -58,7 +59,7 @@ EXPOSE 8080
 # Set environment variables
 ENV PORT=8080
 ENV HOME=/app
-ENV ANTIGRAVITY_CONFIG_DIR=/app/.antigravity
+ENV ANTIGRAVITY_CONFIG_DIR=/app/.gemini
 ENV ANTIGRAVITY_CLI_COMMAND=agy
 
 # Health check
