@@ -1,6 +1,7 @@
 package gemini_impl
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -439,16 +440,30 @@ func parseEnvSeconds(key string, defaultSeconds int) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+// defaultModelSentinel is the placeholder model used when the caller does not
+// specify one. agy 1.0.6 has no model by this name, so we must not forward it
+// as --model; instead we let agy fall back to its own session default.
+const defaultModelSentinel = "antigravity-default"
+
 func (s *GeminiService) askOnce(question string, modelName string) (string, *model.GeminiStatus, error) {
-	// Prepare the command arguments
+	// Prepare the command arguments.
+	// Note: agy 1.0.6 does not support an --output-format flag; --print/--prompt
+	// emits plain text, so we parse the output leniently (JSON if present,
+	// otherwise raw text).
 	args := []string{
 		"--prompt", question,
-		"--output-format", "json",
 	}
 
-	// Add model if specified
-	if modelName != "" {
+	// Add model only when a real model was requested. Skip the empty value and
+	// the "antigravity-default" sentinel, both of which would be rejected by agy.
+	if modelName != "" && modelName != defaultModelSentinel {
 		args = append(args, "--model", modelName)
+	}
+
+	// Auto-approve tool permission prompts so headless invocations don't block
+	// on stdin. Opt-in because it is security sensitive.
+	if parseEnvBool("ANTIGRAVITY_SKIP_PERMISSIONS", false) {
+		args = append(args, "--dangerously-skip-permissions")
 	}
 
 	cliCommand := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CLI_COMMAND"))
@@ -459,20 +474,33 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	if configDir == "" {
 		configDir = "/app/.antigravity"
 	}
+	homeDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_HOME"))
+	if homeDir == "" {
+		homeDir = "/app"
+	}
+
+	// Bound the call so a hung CLI (e.g. waiting on auth) can't block forever.
+	timeout := parseEnvSeconds("ANTIGRAVITY_CLI_TIMEOUT_SECONDS", 300)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
 	// Create command
-	cmd := exec.Command(cliCommand, args...)
+	cmd := exec.CommandContext(ctx, cliCommand, args...)
 
 	// Set environment variables
 	cmd.Env = append(os.Environ(),
-		"HOME=/app",
+		"HOME="+homeDir,
 		"ANTIGRAVITY_CONFIG_DIR="+configDir,
-		"XDG_CONFIG_HOME=/app",
+		"XDG_CONFIG_HOME="+homeDir,
 	)
 
 	// Run command and capture output
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)
+
+	if ctx.Err() == context.DeadlineExceeded {
+		return "", detectUpstreamStatus(outputStr, nil), fmt.Errorf("antigravity CLI (%s) timed out after %s", cliCommand, timeout)
+	}
 	status := detectUpstreamStatus(outputStr, nil)
 	if err != nil {
 		// Provide helpful error messages for common issues
