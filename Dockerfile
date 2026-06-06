@@ -34,6 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
+<<<<<<< HEAD
 # Install Antigravity CLI
 # Official Linux install: https://antigravity.google/cli/install.sh
 # Install into /usr/local/bin so `agy` is on PATH for both the build check and
@@ -41,6 +42,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin && \
   /usr/local/bin/agy --version && \
   echo "✓ Antigravity CLI installed successfully"
+=======
+# Install Gemini CLI (has native dependencies that need compilation)
+RUN npm install -g @google/gemini-cli@0.45.2 && \
+  npm list -g --depth=0 @google/gemini-cli && \
+  echo "✓ Gemini CLI installed successfully"
+>>>>>>> master
 
 # Set up working directory
 WORKDIR /app
