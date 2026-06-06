@@ -1,6 +1,7 @@
 package gemini_impl
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -445,6 +446,31 @@ func parseEnvSeconds(key string, defaultSeconds int) time.Duration {
 // as --model; instead we let agy fall back to its own session default.
 const defaultModelSentinel = "antigravity-default"
 
+func readKeyringEnvFile(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	vars := []string{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		line = strings.TrimPrefix(line, "export ")
+		if line == "" || strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		key := strings.TrimSpace(parts[0])
+		value := strings.Trim(strings.TrimSpace(parts[1]), "'\"")
+		if key != "" {
+			vars = append(vars, key+"="+value)
+		}
+	}
+	return vars, scanner.Err()
+}
+
 func (s *GeminiService) askOnce(question string, modelName string) (string, *model.GeminiStatus, error) {
 	// Prepare the command arguments.
 	// Note: agy 1.0.6 does not support an --output-format flag; --print/--prompt
@@ -472,7 +498,7 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	}
 	configDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CONFIG_DIR"))
 	if configDir == "" {
-		configDir = "/app/.antigravity"
+		configDir = "/app/.gemini"
 	}
 	homeDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_HOME"))
 	if homeDir == "" {
@@ -481,7 +507,7 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 
 	// Bound the call so a hung CLI (e.g. waiting on auth) can't block forever.
 	timeout := parseEnvSeconds("ANTIGRAVITY_CLI_TIMEOUT_SECONDS", 300)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+5*time.Second)
 	defer cancel()
 
 	// Create command
@@ -493,6 +519,13 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 		"ANTIGRAVITY_CONFIG_DIR="+configDir,
 		"XDG_CONFIG_HOME="+homeDir,
 	)
+	keyringEnvFile := strings.TrimSpace(os.Getenv("ANTIGRAVITY_KEYRING_ENV_FILE"))
+	if keyringEnvFile == "" {
+		keyringEnvFile = filepath.Join(configDir, "antigravity-cli", "keyring.env")
+	}
+	if keyringEnv, err := readKeyringEnvFile(keyringEnvFile); err == nil {
+		cmd.Env = append(cmd.Env, keyringEnv...)
+	}
 
 	// Run command and capture output
 	output, err := cmd.CombinedOutput()
@@ -503,13 +536,18 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	}
 	status := detectUpstreamStatus(outputStr, nil)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			fmt.Printf("Antigravity CLI timed out after %s (%s); output=%q\n", timeout, cliCommand, outputStr)
+			return "", status, fmt.Errorf("Antigravity CLI timed out after %s", timeout)
+		}
+
 		// Provide helpful error messages for common issues
 		if strings.Contains(outputStr, "ModelNotFoundError") || strings.Contains(outputStr, "not found") {
 			return "", status, fmt.Errorf("model not found: the model '%s' doesn't exist or isn't available in Antigravity", modelName)
 		}
 
-		if strings.Contains(outputStr, "authentication") || strings.Contains(outputStr, "auth") {
-			return "", status, fmt.Errorf("authentication error: make sure ~/.antigravity is mounted correctly and you're authenticated with Antigravity or Antigravity IDE")
+		if strings.Contains(outputStr, "authentication") || strings.Contains(outputStr, "auth") || strings.Contains(outputStr, "not logged into Antigravity") {
+			return "", status, fmt.Errorf("authentication error: ensure ANTIGRAVITY_CONFIG_DIR (%s) is mounted and authenticated with Antigravity CLI; in Docker, source %s before running agy login/print manually", configDir, filepath.Join(configDir, "antigravity-cli", "keyring.sh"))
 		}
 
 		response, ok := parseGeminiOutput(outputStr)
@@ -529,7 +567,8 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 			}
 		}
 
-		return "", status, fmt.Errorf("failed to execute Antigravity CLI (%s): %v (output: %s)", cliCommand, err, outputStr)
+		fmt.Printf("Antigravity CLI execution failed (%s): %v; output=%q\n", cliCommand, err, outputStr)
+		return "", status, fmt.Errorf("failed to execute Antigravity CLI (%s): %v", cliCommand, err)
 	}
 
 	response, ok := parseGeminiOutput(outputStr)
