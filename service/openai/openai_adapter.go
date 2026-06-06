@@ -289,9 +289,14 @@ func normalizeResponseInputItem(item interface{}) (string, error) {
 		if text, ok := t["text"].(string); ok {
 			return strings.TrimSpace(text), nil
 		}
-		return "", fmt.Errorf("input object item must contain content or text")
+		// Responses API streams a mix of item types (reasoning, tool calls,
+		// function-call outputs, etc.). Items without any textual payload are
+		// not errors — skip them so a single non-text item doesn't fail the
+		// whole request.
+		return "", nil
 	default:
-		return "", fmt.Errorf("input array contains unsupported item type")
+		// Unknown/unsupported item types are skipped rather than rejected.
+		return "", nil
 	}
 }
 
@@ -301,7 +306,7 @@ func normalizeResponseInputContent(content interface{}) (string, error) {
 		return strings.TrimSpace(c), nil
 	case []interface{}:
 		parts := make([]string, 0, len(c))
-		for i, p := range c {
+		for _, p := range c {
 			switch v := p.(type) {
 			case string:
 				trimmed := strings.TrimSpace(v)
@@ -309,17 +314,16 @@ func normalizeResponseInputContent(content interface{}) (string, error) {
 					parts = append(parts, trimmed)
 				}
 			case map[string]interface{}:
-				rawText, ok := v["text"]
-				if !ok {
-					return "", fmt.Errorf("input content[%d] object must contain non-empty text", i)
+				// Accept common text-bearing fields used by the Responses API
+				// (input_text / output_text use "text"). Non-text parts such as
+				// images or refusals are skipped rather than rejected.
+				if rawText, ok := v["text"].(string); ok {
+					if trimmed := strings.TrimSpace(rawText); trimmed != "" {
+						parts = append(parts, trimmed)
+					}
 				}
-				text, ok := rawText.(string)
-				if !ok || strings.TrimSpace(text) == "" {
-					return "", fmt.Errorf("input content[%d] object must contain non-empty text", i)
-				}
-				parts = append(parts, strings.TrimSpace(text))
 			default:
-				return "", fmt.Errorf("input content[%d] has unsupported type %T", i, p)
+				// Skip unsupported content-part types.
 			}
 		}
 		return strings.Join(parts, "\n"), nil

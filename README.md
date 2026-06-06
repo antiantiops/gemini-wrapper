@@ -45,28 +45,13 @@ docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CON
 **You do NOT need to install anything on your computer except Docker!**
 
 ```
-### Step 1:
-agy
-
-###Step 2: Choose Google Oauth
-
-     ▄▀▀▄
-    ▀▀▀▀▀▀
-   ▀▀▀▀▀▀▀▀
-  ▄▀▀    ▀▀▄
- ▄▀▀      ▀▀▄
-
- Welcome to the Antigravity CLI. You are currently not signed in.
-
- Select login method:
- > 1. Google OAuth
-   2. Use a Google Cloud project
-
- [Use arrow keys to navigate, Enter to select]
-
-
-### Step 3: get out of the container
-
+┌─────────────────────────────────────────────────────────────┐
+│                    YOUR COMPUTER (Host)                      │
+│                                                              │
+│  1. Create empty folder: ~/.gemini                          │
+│  2. Run Docker container with mount                         │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
                            ↓ Mount
 ┌─────────────────────────────────────────────────────────────┐
 │                   DOCKER CONTAINER                           │
@@ -76,7 +61,7 @@ agy
 │  • Go application pre-installed ✅                           │
 │                                                              │
 │  3. You run: agy (inside container)                         │
-│  4. Complete the Antigravity sign-in flow                   │
+│  4. Choose "Google OAuth" and sign in                       │
 │  5. Credentials saved to /app/.gemini                       │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
@@ -90,6 +75,22 @@ agy
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
+
+When you run `agy` inside the container, it shows a sign-in menu:
+
+```
+ Welcome to the Antigravity CLI. You are currently not signed in.
+
+ Select login method:
+ > 1. Google OAuth
+   2. Use a Google Cloud project
+
+ [Use arrow keys to navigate, Enter to select]
+```
+
+Choose **1. Google OAuth**, complete the browser sign-in, then exit the
+container shell. Credentials are written to `/app/.gemini` (mounted to
+`~/.gemini` on your host).
 
 **Key Points:**
 - ✅ **No localhost installation** - Everything runs in Docker
@@ -160,14 +161,23 @@ Run this command to enter the container and start the Antigravity sign-in flow:
 docker exec -it gemini-wrapper sh -c 'export HOME=/app && export ANTIGRAVITY_CONFIG_DIR=/app/.gemini && cd /app && agy'
 ```
 
-Follow the on-screen prompts from `agy` to sign in. When the CLI shows a URL:
+Follow the on-screen prompts from `agy` to sign in. You'll see a login menu:
 
-1. **Copy the entire URL** it prints
-2. **Open it in your browser** (on your host computer)
-3. **Sign in** and grant permissions
-4. **Copy the authorization code** the browser shows
-5. **Go back to the container terminal** and paste the code
-6. **Press Enter** until the CLI confirms you are signed in
+```
+ Welcome to the Antigravity CLI. You are currently not signed in.
+
+ Select login method:
+ > 1. Google OAuth
+   2. Use a Google Cloud project
+
+ [Use arrow keys to navigate, Enter to select]
+```
+
+1. Select **1. Google OAuth** (use arrow keys, then Enter)
+2. The CLI prints a sign-in **URL** — copy it
+3. **Open it in your browser** (on your host computer) and sign in
+4. Approve the permissions; if prompted, copy the authorization code back into the terminal
+5. Wait until the CLI confirms you are signed in, then exit the shell
 
 > Note: the exact sign-in prompts depend on your `agy` version. This image is tested with **agy 1.0.6** — run `agy --help` and `agy install` inside the container if you need to (re)configure environment paths.
 
