@@ -25,9 +25,9 @@ type OpenAIModelListResponse struct {
 }
 
 type OpenAIChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-	Name    string `json:"name,omitempty"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"`
+	Name    string      `json:"name,omitempty"`
 }
 
 type OpenAIChatCompletionRequest struct {

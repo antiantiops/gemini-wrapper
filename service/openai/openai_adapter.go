@@ -213,9 +213,41 @@ func buildPromptFromMessages(messages []model.OpenAIChatMessage) string {
 		if role == "" {
 			role = "user"
 		}
-		parts = append(parts, fmt.Sprintf("%s: %s", role, strings.TrimSpace(m.Content)))
+		content := flattenMessageContent(m.Content)
+		parts = append(parts, fmt.Sprintf("%s: %s", role, content))
 	}
 	return strings.Join(parts, "\n")
+}
+
+// flattenMessageContent accepts the OpenAI chat `content` field, which may be a
+// plain string or a structured array of content parts (e.g.
+// [{"type":"text","text":"..."}]). Non-text parts (images, etc.) are skipped.
+func flattenMessageContent(raw interface{}) string {
+	switch v := raw.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(v)
+	case []interface{}:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			switch p := item.(type) {
+			case string:
+				if trimmed := strings.TrimSpace(p); trimmed != "" {
+					parts = append(parts, trimmed)
+				}
+			case map[string]interface{}:
+				if text, ok := p["text"].(string); ok {
+					if trimmed := strings.TrimSpace(text); trimmed != "" {
+						parts = append(parts, trimmed)
+					}
+				}
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		return ""
+	}
 }
 
 func normalizePrompt(raw interface{}) (string, error) {
