@@ -187,28 +187,20 @@ func TestCreateResponseRejectsObjectItemWithoutContentOrText(t *testing.T) {
 	}
 }
 
-func TestCreateResponseRejectsContentArrayUnsupportedElementType(t *testing.T) {
+func TestCreateResponseSkipsUnsupportedContentArrayElements(t *testing.T) {
 	svc := &fakeGeminiService{answer: "hello"}
 	adapter := NewGeminiAdapter(svc)
 
-	_, err := adapter.CreateResponse(model.OpenAIResponseRequest{Input: []interface{}{
+	resp, err := adapter.CreateResponse(model.OpenAIResponseRequest{Input: []interface{}{
 		map[string]interface{}{
 			"content": []interface{}{"ok", 123},
 		},
 	}})
-	if err == nil {
-		t.Fatal("expected error")
+	if err != nil {
+		t.Fatalf("expected success, got error: %v", err)
 	}
-
-	apiErr, ok := err.(*APIError)
-	if !ok {
-		t.Fatalf("expected APIError, got %T", err)
-	}
-	if apiErr.HTTPStatus != 400 || apiErr.Type != "invalid_request_error" || apiErr.Code != "input_invalid" {
-		t.Fatalf("unexpected api error: %#v", apiErr)
-	}
-	if !strings.Contains(apiErr.Message, "input content[1]") {
-		t.Fatalf("expected indexed content error, got: %q", apiErr.Message)
+	if resp.OutputText != "hello" {
+		t.Fatalf("unexpected output: %q", resp.OutputText)
 	}
 }
 
@@ -232,8 +224,8 @@ func TestCreateResponseRejectsContentArrayMapWithoutNonEmptyText(t *testing.T) {
 	if apiErr.HTTPStatus != 400 || apiErr.Type != "invalid_request_error" || apiErr.Code != "input_invalid" {
 		t.Fatalf("unexpected api error: %#v", apiErr)
 	}
-	if !strings.Contains(apiErr.Message, "input content[0]") {
-		t.Fatalf("expected indexed content error, got: %q", apiErr.Message)
+	if !strings.Contains(apiErr.Message, "input is required") {
+		t.Fatalf("expected input-required error, got: %q", apiErr.Message)
 	}
 }
 

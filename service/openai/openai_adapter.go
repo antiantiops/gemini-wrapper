@@ -321,9 +321,13 @@ func normalizeResponseInputItem(item interface{}) (string, error) {
 		if text, ok := t["text"].(string); ok {
 			return strings.TrimSpace(text), nil
 		}
-		return "", fmt.Errorf("input object item must contain content or text")
+		// Tolerate non-text items (reasoning, function_call, tool output, etc.)
+		// that Responses-API clients interleave; skip instead of failing the
+		// whole request. The caller errors only if nothing usable remains.
+		return "", nil
 	default:
-		return "", fmt.Errorf("input array contains unsupported item type")
+		// Skip unsupported scalar item types (numbers, bools, null).
+		return "", nil
 	}
 }
 
@@ -333,7 +337,7 @@ func normalizeResponseInputContent(content interface{}) (string, error) {
 		return strings.TrimSpace(c), nil
 	case []interface{}:
 		parts := make([]string, 0, len(c))
-		for i, p := range c {
+		for _, p := range c {
 			switch v := p.(type) {
 			case string:
 				trimmed := strings.TrimSpace(v)
@@ -341,17 +345,14 @@ func normalizeResponseInputContent(content interface{}) (string, error) {
 					parts = append(parts, trimmed)
 				}
 			case map[string]interface{}:
-				rawText, ok := v["text"]
-				if !ok {
-					return "", fmt.Errorf("input content[%d] object must contain non-empty text", i)
+				// Skip non-text content parts (input_image, refusal, etc.).
+				if text, ok := v["text"].(string); ok {
+					if trimmed := strings.TrimSpace(text); trimmed != "" {
+						parts = append(parts, trimmed)
+					}
 				}
-				text, ok := rawText.(string)
-				if !ok || strings.TrimSpace(text) == "" {
-					return "", fmt.Errorf("input content[%d] object must contain non-empty text", i)
-				}
-				parts = append(parts, strings.TrimSpace(text))
 			default:
-				return "", fmt.Errorf("input content[%d] has unsupported type %T", i, p)
+				// Skip unsupported element types instead of failing.
 			}
 		}
 		return strings.Join(parts, "\n"), nil
