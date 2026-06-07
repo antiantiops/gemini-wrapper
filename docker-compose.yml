@@ -7,6 +7,13 @@ services:
     container_name: gemini-wrapper
     ports:
       - "8080:8080"
+    environment:
+      # Let agy edit the real VSCode/project workspace instead of /app.
+      # Change this to the project path mounted below.
+      - ANTIGRAVITY_WORKDIR=/workspace
+      # Optional but recommended for VSCode/headless usage; otherwise agy may
+      # wait for interactive permission prompts that the API caller cannot answer.
+      - ANTIGRAVITY_SKIP_PERMISSIONS=true
     volumes:
       # Mount .gemini credentials folder from host to container (read-write for token renewal)
       # Make sure to run 'gemini' on host first to authenticate
@@ -14,6 +21,9 @@ services:
       - ${HOME}/.gemini:/app/.gemini
       # Windows: use ${USERPROFILE} instead
       # - ${USERPROFILE}/.gemini:/app/.gemini
+      # Mount the project opened in VSCode so agy can read/write the real files.
+      # Set PROJECT_DIR when starting compose, e.g. PROJECT_DIR=$PWD docker compose up -d
+      - ${PROJECT_DIR:-.}:/workspace
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--method=GET", "http://localhost:8080/"]

@@ -553,6 +553,19 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	cmd := exec.CommandContext(ctx, cliCommand, args...)
 	cmd.Stdin = strings.NewReader(question)
 
+	// Working directory for agy. By default agy runs in the wrapper's own cwd
+	// (/app), so it cannot see the user's project and reports paths like
+	// "workspace path is /app". Set ANTIGRAVITY_WORKDIR to the mounted project
+	// root so agy reads and edits the real files on disk. Only honour the value
+	// when it points at an existing directory to avoid a confusing exec error.
+	if workDir := strings.TrimSpace(os.Getenv("ANTIGRAVITY_WORKDIR")); workDir != "" {
+		if info, statErr := os.Stat(workDir); statErr == nil && info.IsDir() {
+			cmd.Dir = workDir
+		} else {
+			fmt.Printf("Warning: ANTIGRAVITY_WORKDIR=%q is not a usable directory (%v); falling back to default cwd\n", workDir, statErr)
+		}
+	}
+
 	// Set environment variables
 	cmd.Env = append(os.Environ(),
 		"HOME="+homeDir,
@@ -697,7 +710,18 @@ func buildParseCandidates(outputStr string) []parseCandidate {
 func tryParseGeminiResponse(payload string) (GeminiResponse, error) {
 	var response GeminiResponse
 	if err := json.Unmarshal([]byte(payload), &response); err == nil {
-		return response, nil
+		// agy 1.0.6 `--print` emits the model answer as raw text, NOT a
+		// {"response":...} envelope. When the model is asked to reply with a
+		// JSON object (e.g. a classifier), json.Unmarshal happily succeeds into
+		// this struct but leaves Response empty and Error nil, which previously
+		// surfaced as a bogus "received empty response from Antigravity" 500.
+		// Only accept the parse as a genuine envelope when it actually carries
+		// a response or error field; otherwise reject so the caller falls back
+		// to returning the raw output (the model's JSON answer).
+		if isMeaningfulGeminiResponse(response) {
+			return response, nil
+		}
+		return GeminiResponse{}, fmt.Errorf("parsed JSON is not a gemini envelope (no response/error fields)")
 	}
 
 	var encoded string
@@ -712,7 +736,19 @@ func tryParseGeminiResponse(payload string) (GeminiResponse, error) {
 	if err := json.Unmarshal([]byte(encoded), &response); err != nil {
 		return GeminiResponse{}, err
 	}
+	if !isMeaningfulGeminiResponse(response) {
+		return GeminiResponse{}, fmt.Errorf("decoded JSON is not a gemini envelope (no response/error fields)")
+	}
 	return response, nil
+}
+
+// isMeaningfulGeminiResponse reports whether a decoded struct actually looks
+// like an agy/Antigravity envelope. A struct with neither a response string nor
+// an error object is almost certainly the model's own JSON answer that merely
+// happens to unmarshal cleanly into GeminiResponse, and must not be treated as
+// an empty upstream reply.
+func isMeaningfulGeminiResponse(r GeminiResponse) bool {
+	return strings.TrimSpace(r.Response) != "" || r.Error != nil
 }
 
 func parseFallbackModels(raw string) []string {
