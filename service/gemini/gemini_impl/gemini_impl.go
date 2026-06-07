@@ -508,8 +508,14 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	// Note: agy 1.0.6 does not support an --output-format flag; --print/--prompt
 	// emits plain text, so we parse the output leniently (JSON if present,
 	// otherwise raw text).
+	//
+	// IMPORTANT: we pass the prompt on STDIN, not as an argv value. Large prompts
+	// (e.g. VS Code sending system instructions + chat history, tens of KB) would
+	// otherwise overflow the kernel ARG_MAX limit and make fork/exec fail with
+	// "argument list too long" (E2BIG), surfacing as a 500. agy reads the prompt
+	// from stdin when --print is given an empty argument.
 	args := []string{
-		"--prompt", question,
+		"--print", "",
 	}
 
 	// Add model only when a real model was requested. Skip the empty value and
@@ -542,8 +548,10 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Create command
+	// Create command. The prompt is supplied via stdin (see note above) to
+	// avoid ARG_MAX overflow on large requests.
 	cmd := exec.CommandContext(ctx, cliCommand, args...)
+	cmd.Stdin = strings.NewReader(question)
 
 	// Set environment variables
 	cmd.Env = append(os.Environ(),
