@@ -513,9 +513,9 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	// (e.g. VS Code sending system instructions + chat history, tens of KB) would
 	// otherwise overflow the kernel ARG_MAX limit and make fork/exec fail with
 	// "argument list too long" (E2BIG), surfacing as a 500. agy reads the prompt
-	// from stdin when --print is given an empty argument.
+	// from stdin when --print is given "-" as the argument.
 	args := []string{
-		"--print", "",
+		"--print", "-",
 	}
 
 	// Add model only when a real model was requested. Skip the empty value and
