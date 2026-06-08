@@ -518,15 +518,13 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 		"--print", "-",
 	}
 
-	// WORKAROUND: agy --print - with --model flag produces no output (bug in agy 1.0.6).
-	// Commenting out model flag temporarily until agy fixes this issue.
-	// Model selection will fall back to agy's default session model.
-	// TODO: Re-enable when agy fixes --print - --model output bug
-	/*
+	// Add model only when a real model was requested. Skip the empty value and
+	// the "antigravity-default" sentinel, both of which would be rejected by agy.
+	// When primary model returns empty (quota exhausted, rate limited), fallback
+	// logic in askWithFallback will retry with FALLBACK_MODEL.
 	if resolved, ok := resolveModelName(modelName); ok {
 		args = append(args, "--model", resolved)
 	}
-	*/
 
 	// Auto-approve tool permission prompts so headless invocations don't block
 	// on stdin. Opt-in because it is security sensitive.
