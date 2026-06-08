@@ -186,6 +186,11 @@ func (s *GeminiService) askWithFallback(question string, modelName string) (stri
 		}
 
 		answer, status, err := s.askOnce(question, attemptModel)
+		// Treat empty answer as failure (e.g., quota exhausted but agy returned exit 0)
+		if err == nil && strings.TrimSpace(answer) == "" {
+			err = fmt.Errorf("model returned empty response (possibly quota exhausted or rate limited)")
+			fmt.Printf("Empty response from model %s, treating as error for fallback\n", printableModel(attemptModel))
+		}
 		if err == nil {
 			if shouldFallbackAfterSuccess(status, i, len(attemptModels)) {
 				status = withStatusModel(status, attemptModel)
