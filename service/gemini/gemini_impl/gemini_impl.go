@@ -537,6 +537,15 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 		args = append(args, "--dangerously-skip-permissions")
 	}
 
+	// Run agy in sandbox mode so it acts as a pure "brain": it can reason and
+	// answer but is stripped of the ability to touch the host system (no file
+	// writes, no shell side effects, no tool execution against the real env).
+	// Enabled by default; set ANTIGRAVITY_SANDBOX=false to allow agy full
+	// system access. This is the equivalent of running: agy -p --sandbox "...".
+	if parseEnvBool("ANTIGRAVITY_SANDBOX", true) {
+		args = append(args, "--sandbox")
+	}
+
 	cliCommand := strings.TrimSpace(os.Getenv("ANTIGRAVITY_CLI_COMMAND"))
 	if cliCommand == "" {
 		cliCommand = "agy"
