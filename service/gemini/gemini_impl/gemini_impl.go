@@ -510,17 +510,38 @@ func resolveModelName(modelName string) (string, bool) {
 
 func (s *GeminiService) askOnce(question string, modelName string) (string, *model.GeminiStatus, error) {
 	// Prepare the command arguments.
-	// Note: agy 1.0.6 does not support an --output-format flag; --print/--prompt
+	// Note: agy does not support an --output-format flag; --print/--prompt
 	// emits plain text, so we parse the output leniently (JSON if present,
 	// otherwise raw text).
 	//
-	// IMPORTANT: we pass the prompt on STDIN, not as an argv value. Large prompts
-	// (e.g. VS Code sending system instructions + chat history, tens of KB) would
-	// otherwise overflow the kernel ARG_MAX limit and make fork/exec fail with
-	// "argument list too long" (E2BIG), surfacing as a 500. agy reads the prompt
-	// from stdin when --print is given "-" as the argument.
-	args := []string{
-		"--print", "-",
+	// agy 1.1.x no longer reads the prompt from stdin when --print is given
+	// "-" as the argument (it treats "-" as a literal prompt). We therefore
+	// pass the prompt directly as the argv value. For very large prompts
+	// (>100 KB) that risk hitting the kernel ARG_MAX limit, we write the
+	// prompt to a temporary file and pass the file path prefixed with "@"
+	// so agy reads it from disk.
+	const maxArgvPromptBytes = 100 * 1024 // 100 KB safety margin for ARG_MAX
+
+	var promptTmpFile string // non-empty when we created a temp file
+	var args []string
+
+	if len(question) <= maxArgvPromptBytes {
+		// Short prompt: pass directly as argv.
+		args = []string{"--print", question}
+	} else {
+		// Long prompt: write to temp file to avoid E2BIG.
+		tmpFile, tmpErr := os.CreateTemp("", "agy-prompt-*.txt")
+		if tmpErr != nil {
+			return "", nil, fmt.Errorf("failed to create temp file for prompt: %w", tmpErr)
+		}
+		promptTmpFile = tmpFile.Name()
+		if _, wErr := tmpFile.WriteString(question); wErr != nil {
+			_ = tmpFile.Close()
+			_ = os.Remove(promptTmpFile)
+			return "", nil, fmt.Errorf("failed to write prompt to temp file: %w", wErr)
+		}
+		_ = tmpFile.Close()
+		args = []string{"--print", "@" + promptTmpFile}
 	}
 
 	// Add model only when a real model was requested. Skip the empty value and
@@ -564,10 +585,13 @@ func (s *GeminiService) askOnce(question string, modelName string) (string, *mod
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Create command. The prompt is supplied via stdin (see note above) to
-	// avoid ARG_MAX overflow on large requests.
+	// Clean up temp file (if any) when we're done.
+	if promptTmpFile != "" {
+		defer os.Remove(promptTmpFile)
+	}
+
+	// Create command.
 	cmd := exec.CommandContext(ctx, cliCommand, args...)
-	cmd.Stdin = strings.NewReader(question)
 
 	// Working directory for agy. By default agy runs in the wrapper's own cwd
 	// (/app), so it cannot see the user's project and reports paths like
