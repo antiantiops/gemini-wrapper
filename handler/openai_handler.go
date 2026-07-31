@@ -94,7 +94,12 @@ func (h *OpenAIHandler) streamResponse(c *echo.Context, req model.OpenAIResponse
 	r.Header().Set("Cache-Control", "no-cache")
 	r.Header().Set("Connection", "keep-alive")
 	r.WriteHeader(http.StatusOK)
+	sequenceNumber := 0
 	writeEvent := func(event string, payload interface{}) error {
+		sequenceNumber++
+		if eventPayload, ok := payload.(map[string]interface{}); ok {
+			eventPayload["sequence_number"] = sequenceNumber
+		}
 		body, err := json.Marshal(payload)
 		if err != nil {
 			return err
@@ -126,18 +131,23 @@ func (h *OpenAIHandler) streamResponse(c *echo.Context, req model.OpenAIResponse
 		return writeEvent("response.output_text.delta", map[string]interface{}{"type": "response.output_text.delta", "item_id": itemID, "output_index": 0, "content_index": 0, "delta": delta})
 	})
 	if err != nil {
-		errPayload := model.OpenAIErrorResponse{Error: model.OpenAIError{Message: err.Error(), Type: "server_error", Code: "stream_error"}}
+		errPayload := map[string]interface{}{
+			"type":    "error",
+			"code":    "stream_error",
+			"message": err.Error(),
+		}
 		if apiErr, ok := err.(*openai.APIError); ok {
-			errPayload.Error.Message = apiErr.Message
-			if apiErr.Type != "" {
-				errPayload.Error.Type = apiErr.Type
-			}
+			errPayload["message"] = apiErr.Message
 			if apiErr.Code != "" {
-				errPayload.Error.Code = apiErr.Code
+				errPayload["code"] = apiErr.Code
 			}
 		}
-		_ = writeEvent("error", errPayload)
-		return nil
+		if err := writeEvent("error", errPayload); err != nil {
+			return err
+		}
+		_, err := fmt.Fprint(r, "data: [DONE]\n\n")
+		flusher.Flush()
+		return err
 	}
 	if err := writeEvent("response.output_text.done", map[string]interface{}{"type": "response.output_text.done", "item_id": itemID, "output_index": 0, "content_index": 0, "text": resp.OutputText}); err != nil {
 		return err
