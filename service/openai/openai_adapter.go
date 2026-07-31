@@ -209,9 +209,12 @@ func (a *AntigravityAdapter) CreateResponse(req model.OpenAIResponseRequest) (mo
 }
 
 // StreamResponse forwards real incremental text from agy 1.1.8 stream-json.
-// It is intentionally only available when the configured backend implements
-// gemini.StreamingGeminiService; older custom backends retain non-stream calls.
+// It requires the configured backend to implement Stream; older custom backends
+// that lack Stream will return a "stream_not_supported" error.
 func (a *AntigravityAdapter) StreamResponse(ctx context.Context, req model.OpenAIResponseRequest, emit func(string) error) (model.OpenAIResponse, error) {
+	if a.geminiService == nil {
+		return model.OpenAIResponse{}, &APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "Antigravity backend is not initialized"}
+	}
 	streaming, ok := a.geminiService.(interface {
 		Stream(context.Context, string, string, func(gemini_impl.StreamEvent) error) (*model.GeminiStatus, error)
 	})

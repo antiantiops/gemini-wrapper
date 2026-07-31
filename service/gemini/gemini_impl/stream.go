@@ -22,6 +22,23 @@ type StreamEvent struct {
 
 const maxStreamRecordSize = 4 * 1024 * 1024
 
+type boundedWriter struct {
+	b   strings.Builder
+	max int
+}
+
+func (w *boundedWriter) Write(p []byte) (int, error) {
+	if w.b.Len() < w.max {
+		remain := w.max - w.b.Len()
+		if len(p) > remain {
+			w.b.Write(p[:remain])
+		} else {
+			w.b.Write(p)
+		}
+	}
+	return len(p), nil
+}
+
 // Stream runs agy in documented NDJSON mode. It bypasses result caching and
 // singleflight because a stream belongs to exactly one HTTP consumer.
 func (s *GeminiService) Stream(ctx context.Context, question, modelName string, emit func(StreamEvent) error) (*model.GeminiStatus, error) {
@@ -69,35 +86,42 @@ func (s *GeminiService) Stream(ctx context.Context, question, modelName string, 
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	var stderrBuf strings.Builder
+	var stderrBuf boundedWriter
+	stderrBuf.max = 64 * 1024
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func() { defer wg.Done(); _, _ = io.Copy(&stderrBuf, io.LimitReader(stderr, 64*1024)) }()
+	go func() {
+		defer wg.Done()
+		_, _ = io.Copy(&stderrBuf, stderr)
+	}()
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), maxStreamRecordSize)
+	abort := func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+		wg.Wait()
+	}
 	for scanner.Scan() {
 		event, err := parseAgyStreamEvent(scanner.Bytes())
 		if err != nil {
-			_ = cmd.Wait()
-			wg.Wait()
+			abort()
 			return nil, err
 		}
 		if err := emit(event); err != nil {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-			wg.Wait()
+			abort()
 			return nil, err
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		_ = cmd.Wait()
-		wg.Wait()
+		abort()
 		return nil, err
 	}
 	err = cmd.Wait()
 	wg.Wait()
 	if err != nil {
-		if out := strings.TrimSpace(stderrBuf.String()); out != "" {
+		if out := strings.TrimSpace(stderrBuf.b.String()); out != "" {
 			return nil, fmt.Errorf("antigravity stream failed: %w: %s", err, out)
 		}
 		return nil, fmt.Errorf("antigravity stream failed: %w", err)

@@ -83,14 +83,17 @@ func (h *OpenAIHandler) CreateResponse(c *echo.Context) error {
 
 func (h *OpenAIHandler) streamResponse(c *echo.Context, req model.OpenAIResponseRequest) error {
 	r := c.Response()
+	flusher, ok := r.(http.Flusher)
+	if !ok {
+		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 500, Type: "server_error", Code: "streaming_unavailable", Message: "Response writer does not support streaming"})
+	}
+	if req.Model == "" {
+		req.Model = "antigravity-default"
+	}
 	r.Header().Set(echo.HeaderContentType, "text/event-stream")
 	r.Header().Set("Cache-Control", "no-cache")
 	r.Header().Set("Connection", "keep-alive")
 	r.WriteHeader(http.StatusOK)
-	flusher, ok := r.(http.Flusher)
-	if !ok {
-		return fmt.Errorf("response writer does not implement http.Flusher")
-	}
 	writeEvent := func(event string, payload interface{}) error {
 		body, err := json.Marshal(payload)
 		if err != nil {
@@ -119,19 +122,27 @@ func (h *OpenAIHandler) streamResponse(c *echo.Context, req model.OpenAIResponse
 	if err := writeEvent("response.content_part.added", map[string]interface{}{"type": "response.content_part.added", "item_id": itemID, "output_index": 0, "content_index": 0, "part": contentPart}); err != nil {
 		return err
 	}
-	var output string
 	resp, err := h.service.StreamResponse(c.Request().Context(), req, func(delta string) error {
-		output += delta
 		return writeEvent("response.output_text.delta", map[string]interface{}{"type": "response.output_text.delta", "item_id": itemID, "output_index": 0, "content_index": 0, "delta": delta})
 	})
 	if err != nil {
-		_ = writeEvent("error", model.OpenAIErrorResponse{Error: model.OpenAIError{Message: err.Error(), Type: "server_error", Code: "stream_error"}})
+		errPayload := model.OpenAIErrorResponse{Error: model.OpenAIError{Message: err.Error(), Type: "server_error", Code: "stream_error"}}
+		if apiErr, ok := err.(*openai.APIError); ok {
+			errPayload.Error.Message = apiErr.Message
+			if apiErr.Type != "" {
+				errPayload.Error.Type = apiErr.Type
+			}
+			if apiErr.Code != "" {
+				errPayload.Error.Code = apiErr.Code
+			}
+		}
+		_ = writeEvent("error", errPayload)
 		return nil
 	}
-	if err := writeEvent("response.output_text.done", map[string]interface{}{"type": "response.output_text.done", "item_id": itemID, "output_index": 0, "content_index": 0, "text": output}); err != nil {
+	if err := writeEvent("response.output_text.done", map[string]interface{}{"type": "response.output_text.done", "item_id": itemID, "output_index": 0, "content_index": 0, "text": resp.OutputText}); err != nil {
 		return err
 	}
-	contentPart["text"] = output
+	contentPart["text"] = resp.OutputText
 	if err := writeEvent("response.content_part.done", map[string]interface{}{"type": "response.content_part.done", "item_id": itemID, "output_index": 0, "content_index": 0, "part": contentPart}); err != nil {
 		return err
 	}
@@ -149,49 +160,6 @@ func (h *OpenAIHandler) streamResponse(c *echo.Context, req model.OpenAIResponse
 	return err
 }
 
-// writeResponseSSE preserves the former buffered SSE helper for compatibility.
-func writeResponseSSE(c *echo.Context, resp model.OpenAIResponse) error {
-	r := c.Response()
-	r.Header().Set(echo.HeaderContentType, "text/event-stream")
-	r.Header().Set("Cache-Control", "no-cache")
-	r.Header().Set("Connection", "keep-alive")
-	r.WriteHeader(http.StatusOK)
-	flusher, ok := r.(http.Flusher)
-	if !ok {
-		return fmt.Errorf("response writer does not implement http.Flusher")
-	}
-
-	writeEvent := func(event string, payload interface{}) error {
-		body, err := json.Marshal(payload)
-		if err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintf(r, "event: %s\ndata: %s\n\n", event, string(body)); err != nil {
-			return err
-		}
-		flusher.Flush()
-		return nil
-	}
-
-	if err := writeEvent("response.created", map[string]interface{}{"type": "response.created", "response": resp}); err != nil {
-		return err
-	}
-	if resp.OutputText != "" {
-		if err := writeEvent("response.output_text.delta", map[string]interface{}{"type": "response.output_text.delta", "delta": resp.OutputText}); err != nil {
-			return err
-		}
-		if err := writeEvent("response.output_text.done", map[string]interface{}{"type": "response.output_text.done", "text": resp.OutputText}); err != nil {
-			return err
-		}
-	}
-	if err := writeEvent("response.completed", map[string]interface{}{"type": "response.completed", "response": resp}); err != nil {
-		return err
-	}
-
-	_, err := fmt.Fprint(r, "data: [DONE]\n\n")
-	flusher.Flush()
-	return err
-}
 
 func writeOpenAIError(c *echo.Context, err error) error {
 	if apiErr, ok := err.(*openai.APIError); ok {
