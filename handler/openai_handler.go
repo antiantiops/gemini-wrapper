@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"gemini-wrapper/model"
 	"gemini-wrapper/service/openai"
@@ -101,21 +102,45 @@ func (h *OpenAIHandler) streamResponse(c *echo.Context, req model.OpenAIResponse
 		flusher.Flush()
 		return nil
 	}
-	if err := writeEvent("response.created", map[string]interface{}{"type": "response.created", "response": map[string]interface{}{"object": "response", "status": "in_progress"}}); err != nil {
+	responseID := fmt.Sprintf("resp-%d", time.Now().UnixNano())
+	itemID := fmt.Sprintf("msg-%d", time.Now().UnixNano())
+	response := map[string]interface{}{"id": responseID, "object": "response", "status": "in_progress", "model": req.Model}
+	item := map[string]interface{}{"id": itemID, "type": "message", "role": "assistant", "status": "in_progress", "content": []interface{}{}}
+	if err := writeEvent("response.created", map[string]interface{}{"type": "response.created", "response": response}); err != nil {
+		return err
+	}
+	if err := writeEvent("response.in_progress", map[string]interface{}{"type": "response.in_progress", "response": response}); err != nil {
+		return err
+	}
+	if err := writeEvent("response.output_item.added", map[string]interface{}{"type": "response.output_item.added", "output_index": 0, "item": item}); err != nil {
+		return err
+	}
+	contentPart := map[string]interface{}{"type": "output_text", "text": "", "annotations": []interface{}{}}
+	if err := writeEvent("response.content_part.added", map[string]interface{}{"type": "response.content_part.added", "item_id": itemID, "output_index": 0, "content_index": 0, "part": contentPart}); err != nil {
 		return err
 	}
 	var output string
 	resp, err := h.service.StreamResponse(c.Request().Context(), req, func(delta string) error {
 		output += delta
-		return writeEvent("response.output_text.delta", map[string]interface{}{"type": "response.output_text.delta", "delta": delta})
+		return writeEvent("response.output_text.delta", map[string]interface{}{"type": "response.output_text.delta", "item_id": itemID, "output_index": 0, "content_index": 0, "delta": delta})
 	})
 	if err != nil {
 		_ = writeEvent("error", model.OpenAIErrorResponse{Error: model.OpenAIError{Message: err.Error(), Type: "server_error", Code: "stream_error"}})
 		return nil
 	}
-	if err := writeEvent("response.output_text.done", map[string]interface{}{"type": "response.output_text.done", "text": output}); err != nil {
+	if err := writeEvent("response.output_text.done", map[string]interface{}{"type": "response.output_text.done", "item_id": itemID, "output_index": 0, "content_index": 0, "text": output}); err != nil {
 		return err
 	}
+	contentPart["text"] = output
+	if err := writeEvent("response.content_part.done", map[string]interface{}{"type": "response.content_part.done", "item_id": itemID, "output_index": 0, "content_index": 0, "part": contentPart}); err != nil {
+		return err
+	}
+	item["status"] = "completed"
+	item["content"] = []interface{}{contentPart}
+	if err := writeEvent("response.output_item.done", map[string]interface{}{"type": "response.output_item.done", "output_index": 0, "item": item}); err != nil {
+		return err
+	}
+	resp.ID = responseID
 	if err := writeEvent("response.completed", map[string]interface{}{"type": "response.completed", "response": resp}); err != nil {
 		return err
 	}
