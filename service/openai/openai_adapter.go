@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"gemini-wrapper/model"
 	"gemini-wrapper/service/gemini"
+	"gemini-wrapper/service/gemini/gemini_impl"
 )
 
 type AntigravityAdapter struct {
@@ -204,6 +206,42 @@ func (a *AntigravityAdapter) CreateResponse(req model.OpenAIResponseRequest) (mo
 			TotalTokens:      promptTokens + completionTokens,
 		},
 	}, nil
+}
+
+// StreamResponse forwards real incremental text from agy 1.1.8 stream-json.
+// It is intentionally only available when the configured backend implements
+// gemini.StreamingGeminiService; older custom backends retain non-stream calls.
+func (a *AntigravityAdapter) StreamResponse(ctx context.Context, req model.OpenAIResponseRequest, emit func(string) error) (model.OpenAIResponse, error) {
+	streaming, ok := a.geminiService.(interface {
+		Stream(context.Context, string, string, func(gemini_impl.StreamEvent) error) (*model.GeminiStatus, error)
+	})
+	if !ok {
+		return model.OpenAIResponse{}, &APIError{HTTPStatus: 501, Type: "server_error", Code: "stream_not_supported", Message: "Antigravity backend does not support incremental streaming"}
+	}
+	prompt, err := normalizeResponseInput(req.Input)
+	if err != nil {
+		return model.OpenAIResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "input_invalid", Message: err.Error()}
+	}
+	if strings.TrimSpace(req.Instructions) != "" {
+		prompt = strings.TrimSpace(req.Instructions) + "\n\n" + prompt
+	}
+	modelName := req.Model
+	if modelName == "" {
+		modelName = "antigravity-default"
+	}
+	var answer strings.Builder
+	_, err = streaming.Stream(ctx, prompt, modelName, func(event gemini_impl.StreamEvent) error {
+		if event.Delta == "" {
+			return nil
+		}
+		answer.WriteString(event.Delta)
+		return emit(event.Delta)
+	})
+	if err != nil {
+		return model.OpenAIResponse{}, convertAntigravityError(err, nil)
+	}
+	now := time.Now().Unix()
+	return model.OpenAIResponse{ID: fmt.Sprintf("resp-%d", time.Now().UnixNano()), Object: "response", CreatedAt: now, Status: "completed", Model: modelName, Output: []model.OpenAIResponseOutput{{Type: "message", Role: "assistant", Content: []model.OpenAIResponseContent{{Type: "output_text", Text: answer.String()}}}}, OutputText: answer.String(), Usage: model.OpenAIUsage{PromptTokens: estimateTokens(prompt), CompletionTokens: estimateTokens(answer.String()), TotalTokens: estimateTokens(prompt) + estimateTokens(answer.String())}}, nil
 }
 
 func buildPromptFromMessages(messages []model.OpenAIChatMessage) string {
