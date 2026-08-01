@@ -1,12 +1,16 @@
 package openai
 
-import "gemini-wrapper/model"
+import (
+	"context"
+	"gemini-wrapper/model"
+)
 
 type Service interface {
 	ListModels() model.OpenAIModelListResponse
 	CreateChatCompletion(req model.OpenAIChatCompletionRequest) (model.OpenAIChatCompletionResponse, error)
 	CreateCompletion(req model.OpenAICompletionRequest) (model.OpenAICompletionResponse, error)
 	CreateResponse(req model.OpenAIResponseRequest) (model.OpenAIResponse, error)
+	StreamResponse(ctx context.Context, req model.OpenAIResponseRequest, emit func(string) error) (model.OpenAIResponse, error)
 }
 
 type APIError struct {

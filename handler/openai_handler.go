@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"gemini-wrapper/model"
 	"gemini-wrapper/service/openai"
@@ -70,59 +71,105 @@ func (h *OpenAIHandler) CreateResponse(c *echo.Context) error {
 		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "invalid_json", Message: "Invalid JSON body"})
 	}
 
+	if req.Stream {
+		return h.streamResponse(c, req)
+	}
 	resp, err := h.service.CreateResponse(req)
 	if err != nil {
 		return writeOpenAIError(c, err)
 	}
-
-	if req.Stream {
-		return writeResponseSSE(c, resp)
-	}
 	return c.JSON(http.StatusOK, resp)
 }
 
-func writeResponseSSE(c *echo.Context, resp model.OpenAIResponse) error {
+func (h *OpenAIHandler) streamResponse(c *echo.Context, req model.OpenAIResponseRequest) error {
 	r := c.Response()
+	flusher, ok := r.(http.Flusher)
+	if !ok {
+		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 500, Type: "server_error", Code: "streaming_unavailable", Message: "Response writer does not support streaming"})
+	}
+	if req.Model == "" {
+		req.Model = "antigravity-default"
+	}
 	r.Header().Set(echo.HeaderContentType, "text/event-stream")
 	r.Header().Set("Cache-Control", "no-cache")
 	r.Header().Set("Connection", "keep-alive")
 	r.WriteHeader(http.StatusOK)
-	flusher, ok := r.(http.Flusher)
-	if !ok {
-		return fmt.Errorf("response writer does not implement http.Flusher")
-	}
-
+	sequenceNumber := 0
 	writeEvent := func(event string, payload interface{}) error {
+		sequenceNumber++
+		if eventPayload, ok := payload.(map[string]interface{}); ok {
+			eventPayload["sequence_number"] = sequenceNumber
+		}
 		body, err := json.Marshal(payload)
 		if err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(r, "event: %s\ndata: %s\n\n", event, string(body)); err != nil {
+		if _, err := fmt.Fprintf(r, "event: %s\ndata: %s\n\n", event, body); err != nil {
 			return err
 		}
 		flusher.Flush()
 		return nil
 	}
-
-	if err := writeEvent("response.created", map[string]interface{}{"type": "response.created", "response": resp}); err != nil {
+	responseID := fmt.Sprintf("resp-%d", time.Now().UnixNano())
+	itemID := fmt.Sprintf("msg-%d", time.Now().UnixNano())
+	response := map[string]interface{}{"id": responseID, "object": "response", "status": "in_progress", "model": req.Model}
+	item := map[string]interface{}{"id": itemID, "type": "message", "role": "assistant", "status": "in_progress", "content": []interface{}{}}
+	if err := writeEvent("response.created", map[string]interface{}{"type": "response.created", "response": response}); err != nil {
 		return err
 	}
-	if resp.OutputText != "" {
-		if err := writeEvent("response.output_text.delta", map[string]interface{}{"type": "response.output_text.delta", "delta": resp.OutputText}); err != nil {
-			return err
-		}
-		if err := writeEvent("response.output_text.done", map[string]interface{}{"type": "response.output_text.done", "text": resp.OutputText}); err != nil {
-			return err
-		}
+	if err := writeEvent("response.in_progress", map[string]interface{}{"type": "response.in_progress", "response": response}); err != nil {
+		return err
 	}
+	if err := writeEvent("response.output_item.added", map[string]interface{}{"type": "response.output_item.added", "output_index": 0, "item": item}); err != nil {
+		return err
+	}
+	contentPart := map[string]interface{}{"type": "output_text", "text": "", "annotations": []interface{}{}}
+	if err := writeEvent("response.content_part.added", map[string]interface{}{"type": "response.content_part.added", "item_id": itemID, "output_index": 0, "content_index": 0, "part": contentPart}); err != nil {
+		return err
+	}
+	resp, err := h.service.StreamResponse(c.Request().Context(), req, func(delta string) error {
+		return writeEvent("response.output_text.delta", map[string]interface{}{"type": "response.output_text.delta", "item_id": itemID, "output_index": 0, "content_index": 0, "delta": delta})
+	})
+	if err != nil {
+		errPayload := map[string]interface{}{
+			"type":    "error",
+			"code":    "stream_error",
+			"message": err.Error(),
+		}
+		if apiErr, ok := err.(*openai.APIError); ok {
+			errPayload["message"] = apiErr.Message
+			if apiErr.Code != "" {
+				errPayload["code"] = apiErr.Code
+			}
+		}
+		if err := writeEvent("error", errPayload); err != nil {
+			return err
+		}
+		_, err := fmt.Fprint(r, "data: [DONE]\n\n")
+		flusher.Flush()
+		return err
+	}
+	if err := writeEvent("response.output_text.done", map[string]interface{}{"type": "response.output_text.done", "item_id": itemID, "output_index": 0, "content_index": 0, "text": resp.OutputText}); err != nil {
+		return err
+	}
+	contentPart["text"] = resp.OutputText
+	if err := writeEvent("response.content_part.done", map[string]interface{}{"type": "response.content_part.done", "item_id": itemID, "output_index": 0, "content_index": 0, "part": contentPart}); err != nil {
+		return err
+	}
+	item["status"] = "completed"
+	item["content"] = []interface{}{contentPart}
+	if err := writeEvent("response.output_item.done", map[string]interface{}{"type": "response.output_item.done", "output_index": 0, "item": item}); err != nil {
+		return err
+	}
+	resp.ID = responseID
 	if err := writeEvent("response.completed", map[string]interface{}{"type": "response.completed", "response": resp}); err != nil {
 		return err
 	}
-
-	_, err := fmt.Fprint(r, "data: [DONE]\n\n")
+	_, err = fmt.Fprint(r, "data: [DONE]\n\n")
 	flusher.Flush()
 	return err
 }
+
 
 func writeOpenAIError(c *echo.Context, err error) error {
 	if apiErr, ok := err.(*openai.APIError); ok {
