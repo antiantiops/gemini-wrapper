@@ -252,7 +252,7 @@ curl -X POST http://localhost:8080/api/ask \
   -H "Content-Type: application/json" \
   -d '{
     "question": "Explain quantum computing",
-    "model": "Gemini 3.5 Flash (Medium)"
+    "model": "Gemini 3.7 Flash (Medium)"
   }'
 ```
 
@@ -282,7 +282,7 @@ curl -X POST "http://localhost:8080/v1beta/models/Gemini%203.5%20Flash%20(Medium
 **Response:**
 ```json
 {
-  "model": "Gemini 3.5 Flash (Medium)",
+  "model": "Gemini 3.7 Flash (Medium)",
   "candidates": [
     {
       "content": {
@@ -317,8 +317,8 @@ Authentication behavior for `/v1/*` depends on container environment:
 
 You can configure fallback models for capacity/rate-limit errors (for example when a Pro model is exhausted):
 
-- Supports bracket list: `FALLBACK_MODEL=[Gemini 3.5 Flash (Medium),Gemini 3.5 Flash (Low)]`
-- Supports comma-separated list: `FALLBACK_MODEL=Gemini 3.5 Flash (Medium),Gemini 3.5 Flash (Low)`
+- Supports bracket list: `FALLBACK_MODEL=[Gemini 3.7 Flash (Medium),Gemini 3.7 Flash (Low)]`
+- Supports comma-separated list: `FALLBACK_MODEL=Gemini 3.7 Flash (Medium),Gemini 3.7 Flash (Low)`
 - Retry happens in listed order.
 - On successful fallback, logs show the fallback attempt and success model.
 - OpenAI-compatible responses return the actual `model` used after fallback.
@@ -330,7 +330,7 @@ docker rm -f gemini-wrapper
 docker run -d -p 8080:8080 \
   -v ~/.gemini:/app/.gemini \
   -e OPENAI_API_KEY=sk-local-demo \
-  -e "FALLBACK_MODEL=Gemini 3.5 Flash (Medium),Gemini 3.5 Flash (Low)" \
+  -e "FALLBACK_MODEL=Gemini 3.7 Flash (Medium),Gemini 3.7 Flash (Low)" \
   --name gemini-wrapper \
   antiantiops/gemini-wrapper:latest
 ```
@@ -342,7 +342,7 @@ docker rm -f gemini-wrapper
 docker run -d -p 8080:8080 `
   -v ${env:USERPROFILE}\.gemini:/app/.gemini `
   -e OPENAI_API_KEY=sk-local-demo `
-  -e "FALLBACK_MODEL=Gemini 3.5 Flash (Medium),Gemini 3.5 Flash (Low)" `
+  -e "FALLBACK_MODEL=Gemini 3.7 Flash (Medium),Gemini 3.7 Flash (Low)" `
   --name gemini-wrapper `
   antiantiops/gemini-wrapper:latest
 ```
@@ -359,7 +359,7 @@ curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-local-demo" \
   -d '{
-    "model": "Gemini 3.5 Flash (Medium)",
+    "model": "Gemini 3.7 Flash (Medium)",
     "messages": [
       {"role": "user", "content": "Hello"}
     ]
@@ -376,9 +376,9 @@ These are the exact model names accepted by `agy 1.0.6` (run `agy models` inside
 
 | Model (`agy` display name) | Notes |
 |----------------------------|-------|
-| `Gemini 3.5 Flash (Medium)` | Balanced Flash tier |
-| `Gemini 3.5 Flash (High)` | Higher-effort Flash |
-| `Gemini 3.5 Flash (Low)` | Fastest / cheapest Flash |
+| `Gemini 3.7 Flash (Medium)` | Balanced Flash tier |
+| `Gemini 3.7 Flash (High)` | Higher-effort Flash |
+| `Gemini 3.7 Flash (Low)` | Fastest / cheapest Flash |
 | `Gemini 3.1 Pro (Low)` | Pro, lower effort |
 | `Gemini 3.1 Pro (High)` | Pro, highest quality |
 | `Claude Sonnet 4.6 (Thinking)` | Anthropic Sonnet |
@@ -391,7 +391,7 @@ These are the exact model names accepted by `agy 1.0.6` (run `agy models` inside
 
 | Alias | Resolves to |
 |-------|-------------|
-| `gemini-3.5-flash`, `gemini-flash` | `Gemini 3.5 Flash (Medium)` |
+| `gemini-3.7-flash`, `gemini-flash` | `Gemini 3.7 Flash (Medium)` |
 | `gemini-3.1-pro`, `gemini-pro` | `Gemini 3.1 Pro (High)` |
 | `claude-sonnet-4.6`, `claude-sonnet` | `Claude Sonnet 4.6 (Thinking)` |
 | `claude-opus-4.6`, `claude-opus` | `Claude Opus 4.6 (Thinking)` |
@@ -405,7 +405,7 @@ If you omit `model` (or send `antigravity-default`), the wrapper does **not** pa
 # Use a Flash tier
 curl -X POST http://localhost:8080/api/ask \
   -H "Content-Type: application/json" \
-  -d '{"question": "Hi!", "model": "Gemini 3.5 Flash (Low)"}'
+  -d '{"question": "Hi!", "model": "Gemini 3.7 Flash (Low)"}'
 
 # Default (no model) - agy picks its session default
 curl -X POST http://localhost:8080/api/ask \
