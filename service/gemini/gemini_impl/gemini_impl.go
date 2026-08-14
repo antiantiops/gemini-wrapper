@@ -469,7 +469,6 @@ var knownAgyModels = []string{
 // resolving aliases here prevents callers from silently getting the wrong model.
 var modelAliases = map[string]string{
 	"gemini-3.7-flash":       "Gemini 3.7 Flash (Medium)",
-	"gemini-3.5-flash":       "Gemini 3.7 Flash (Medium)",
 	"gemini-flash":           "Gemini 3.7 Flash (Medium)",
 	"gemini-3.7-flash-high":  "Gemini 3.7 Flash (High)",
 	"gemini-flash-high":      "Gemini 3.7 Flash (High)",
