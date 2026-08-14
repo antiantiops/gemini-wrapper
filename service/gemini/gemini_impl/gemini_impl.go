@@ -454,9 +454,9 @@ const defaultModelSentinel = "antigravity-default"
 // 1.0.6 (see `agy models`). Matching is case-insensitive against the canonical
 // name as well as a set of convenience aliases.
 var knownAgyModels = []string{
-	"Gemini 3.5 Flash (Medium)",
-	"Gemini 3.5 Flash (High)",
-	"Gemini 3.5 Flash (Low)",
+	"Gemini 3.7 Flash (Medium)",
+	"Gemini 3.7 Flash (High)",
+	"Gemini 3.7 Flash (Low)",
 	"Gemini 3.1 Pro (Low)",
 	"Gemini 3.1 Pro (High)",
 	"Claude Sonnet 4.6 (Thinking)",
@@ -468,8 +468,9 @@ var knownAgyModels = []string{
 // agy silently falls back to its default model when given an unknown name, so
 // resolving aliases here prevents callers from silently getting the wrong model.
 var modelAliases = map[string]string{
-	"gemini-3.5-flash":  "Gemini 3.5 Flash (Medium)",
-	"gemini-flash":      "Gemini 3.5 Flash (Medium)",
+	"gemini-3.7-flash":  "Gemini 3.7 Flash (Medium)",
+	"gemini-3.5-flash":  "Gemini 3.7 Flash (Medium)",
+	"gemini-flash":      "Gemini 3.7 Flash (Medium)",
 	"gemini-3.1-pro":    "Gemini 3.1 Pro (High)",
 	"gemini-pro":        "Gemini 3.1 Pro (High)",
 	"claude-sonnet-4.6": "Claude Sonnet 4.6 (Thinking)",
