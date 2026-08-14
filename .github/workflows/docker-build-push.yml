@@ -3,29 +3,58 @@ name: Build and Push Docker Image
 on:
   push:
     branches:
-      - master  # Changed from main to master
+      - master
     tags:
       - 'v*.*.*'
   pull_request:
     branches:
-      - master  # Changed from main to master
+      - master
   workflow_dispatch:
 
 env:
   IMAGE_NAME: antiantiops/gemini-wrapper
 
 jobs:
-  build-and-push:
+  # ------------------------------------------------------------------
+  # 1) Compute image tags/labels once — shared by all arch jobs + merge
+  # ------------------------------------------------------------------
+  prepare:
     runs-on: ubuntu-latest
-    
+    outputs:
+      tags: ${{ steps.meta.outputs.tags }}
+      labels: ${{ steps.meta.outputs.labels }}
+    steps:
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=ref,event=branch
+            type=sha,prefix=sha-,event=branch
+
+  # ------------------------------------------------------------------
+  # 2) Build each arch in parallel, push as per-platform digest
+  # ------------------------------------------------------------------
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
-        with:
-          platforms: all
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -36,32 +65,74 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.IMAGE_NAME }}
-          tags: |
-            # Set latest tag for default branch
-            type=raw,value=latest,enable={{is_default_branch}}
-            # Version tags for releases (e.g., v0.1.0 -> 0.1.0, 0.1, 0)
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            # Branch name for branch pushes (e.g., master, develop)
-            type=ref,event=branch
-            # SHA for branch commits only (e.g., master-5a554ab)
-            # Only enabled for branch events (not tags)
-            type=sha,prefix=sha-,event=branch
+      # Slug the platform name for use as cache key / artifact name
+      - name: Platform slug
+        id: slug
+        run: echo "slug=$(echo '${{ matrix.platform }}' | tr '/' '-')" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push Docker image
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            AGY_VERSION=${{ github.ref_name }}
+          labels: ${{ needs.prepare.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-${{ steps.slug.outputs.slug }}
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-${{ steps.slug.outputs.slug }},mode=max
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest='${{ steps.build.outputs.digest }}'
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ steps.slug.outputs.slug }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ------------------------------------------------------------------
+  # 3) Merge per-arch digests into a single multi-arch manifest
+  # ------------------------------------------------------------------
+  merge:
+    needs:
+      - prepare
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          TAGS=$(echo '${{ needs.prepare.outputs.tags }}' | tr '\n' ' ')
+          TAG_ARGS=""
+          for tag in $TAGS; do
+            TAG_ARGS="$TAG_ARGS -t $tag"
+          done
+          DIGESTS=$(printf '${{ env.IMAGE_NAME }}@sha256:%s ' *)
+          docker buildx imagetools create $TAG_ARGS $DIGESTS
+
+      - name: Inspect image
+        run: docker buildx imagetools inspect '${{ env.IMAGE_NAME }}:latest'

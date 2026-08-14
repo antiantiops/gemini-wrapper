@@ -38,9 +38,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Official Linux install: https://antigravity.google/cli/install.sh
 # Install into /usr/local/bin so `agy` is on PATH for both the build check and
 # at runtime (where HOME=/app, so the script's default ~/.local/bin is unusable).
-RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin && \
+#
+# IMPORTANT: The install script skips download when the binary already exists.
+# We rm -f first so every build gets the latest version. The ARG below also
+# busts the Docker layer cache when the Release Watch workflow bumps the pin.
+ARG AGY_VERSION=latest
+RUN rm -f /usr/local/bin/agy && \
+  curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin && \
   /usr/local/bin/agy --version && \
-  echo "✓ Antigravity CLI installed successfully"
+  echo "✓ Antigravity CLI installed successfully (expected: ${AGY_VERSION})"
 
 # Set up working directory
 WORKDIR /app
