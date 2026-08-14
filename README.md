@@ -392,6 +392,7 @@ These are the exact model names accepted by `agy 1.0.6` (run `agy models` inside
 | Alias | Resolves to |
 |-------|-------------|
 | `gemini-3.7-flash`, `gemini-flash` | `Gemini 3.7 Flash (Medium)` |
+| `gemini-3.7-flash-high`, `gemini-flash-high` | `Gemini 3.7 Flash (High)` |
 | `gemini-3.1-pro`, `gemini-pro` | `Gemini 3.1 Pro (High)` |
 | `claude-sonnet-4.6`, `claude-sonnet` | `Claude Sonnet 4.6 (Thinking)` |
 | `claude-opus-4.6`, `claude-opus` | `Claude Opus 4.6 (Thinking)` |

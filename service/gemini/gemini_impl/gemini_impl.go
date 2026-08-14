@@ -468,9 +468,11 @@ var knownAgyModels = []string{
 // agy silently falls back to its default model when given an unknown name, so
 // resolving aliases here prevents callers from silently getting the wrong model.
 var modelAliases = map[string]string{
-	"gemini-3.7-flash":  "Gemini 3.7 Flash (Medium)",
-	"gemini-3.5-flash":  "Gemini 3.7 Flash (Medium)",
-	"gemini-flash":      "Gemini 3.7 Flash (Medium)",
+	"gemini-3.7-flash":       "Gemini 3.7 Flash (Medium)",
+	"gemini-3.5-flash":       "Gemini 3.7 Flash (Medium)",
+	"gemini-flash":           "Gemini 3.7 Flash (Medium)",
+	"gemini-3.7-flash-high":  "Gemini 3.7 Flash (High)",
+	"gemini-flash-high":      "Gemini 3.7 Flash (High)",
 	"gemini-3.1-pro":    "Gemini 3.1 Pro (High)",
 	"gemini-pro":        "Gemini 3.1 Pro (High)",
 	"claude-sonnet-4.6": "Claude Sonnet 4.6 (Thinking)",
