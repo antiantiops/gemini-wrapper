@@ -2,6 +2,7 @@ package agy_session
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -105,14 +106,20 @@ func (m *Manager) Start() (string, Event, error) {
 	return id, init, nil
 }
 
-func (m *Manager) Turn(id, content string, emit func(Event) error) error {
+func (m *Manager) Turn(ctx context.Context, id, content string, emit func(Event) error) error {
 	m.mu.Lock()
 	s := m.sessions[id]
 	m.mu.Unlock()
 	if s == nil {
 		return ErrNotFound
 	}
-	return s.turn(content, emit)
+	err := s.turn(ctx, content, emit)
+	if err != nil {
+		// If turn aborted, client disconnected, context canceled, or read failed,
+		// the scanner stream is desynchronized or process died. Purge session.
+		_ = m.Close(id)
+	}
+	return err
 }
 
 func (m *Manager) Exists(id string) bool {
@@ -130,6 +137,24 @@ func (m *Manager) Close(id string) error {
 	if s == nil {
 		return ErrNotFound
 	}
+	return s.terminate()
+}
+
+func (m *Manager) CloseAll() {
+	m.mu.Lock()
+	all := make([]*session, 0, len(m.sessions))
+	for id, s := range m.sessions {
+		all = append(all, s)
+		delete(m.sessions, id)
+	}
+	m.mu.Unlock()
+
+	for _, s := range all {
+		_ = s.terminate()
+	}
+}
+
+func (s *session) terminate() error {
 	_ = s.stdin.Close()
 	if s.cmd.Process != nil {
 		_ = s.cmd.Process.Kill()
@@ -143,13 +168,19 @@ func (m *Manager) Close(id string) error {
 	return nil
 }
 
-func (s *session) turn(content string, emit func(Event) error) error {
+type nextResult struct {
+	event Event
+	err   error
+}
+
+func (s *session) turn(ctx context.Context, content string, emit func(Event) error) error {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return errors.New("content is required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	request := map[string]any{"event": "user", "message": map[string]string{"role": "user", "content": content}}
 	encoded, err := json.Marshal(request)
 	if err != nil {
@@ -158,16 +189,27 @@ func (s *session) turn(content string, emit func(Event) error) error {
 	if _, err = s.stdin.Write(append(encoded, '\n')); err != nil {
 		return err
 	}
+
+	readCh := make(chan nextResult, 1)
 	for {
-		event, err := s.next()
-		if err != nil {
-			return err
-		}
-		if err := emit(event); err != nil {
-			return err
-		}
-		if event["event"] == "result" {
-			return nil
+		go func() {
+			ev, err := s.next()
+			readCh <- nextResult{event: ev, err: err}
+		}()
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case res := <-readCh:
+			if res.err != nil {
+				return res.err
+			}
+			if err := emit(res.event); err != nil {
+				return err
+			}
+			if res.event["event"] == "result" {
+				return nil
+			}
 		}
 	}
 }

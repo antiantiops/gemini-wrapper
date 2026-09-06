@@ -12,7 +12,9 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-type SessionHandler struct{ manager *agy_session.Manager }
+type SessionHandler struct {
+	manager *agy_session.Manager
+}
 
 type turnRequest struct {
 	Content string `json:"content"`
@@ -41,9 +43,11 @@ func (h *SessionHandler) Turn(c *echo.Context) error {
 	if !h.manager.Exists(c.Param("id")) {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "session not found"})
 	}
+
 	c.Response().Header().Set("Content-Type", "application/x-ndjson")
 	c.Response().WriteHeader(http.StatusOK)
 	writer := bufio.NewWriter(c.Response())
+
 	emit := func(event agy_session.Event) error {
 		line, err := json.Marshal(event)
 		if err != nil {
@@ -54,7 +58,9 @@ func (h *SessionHandler) Turn(c *echo.Context) error {
 		}
 		return writer.Flush()
 	}
-	if err := h.manager.Turn(c.Param("id"), request.Content, emit); err != nil {
+
+	ctx := c.Request().Context()
+	if err := h.manager.Turn(ctx, c.Param("id"), request.Content, emit); err != nil {
 		return err
 	}
 	return nil
