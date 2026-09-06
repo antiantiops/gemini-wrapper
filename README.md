@@ -480,3 +480,25 @@ docker run -d -p 8080:8080 \
 ```
 
 **Made with ❤️ using Go, Echo, and Google's Antigravity CLI (`agy`)**
+
+### Native `agy` Agent Sessions
+
+`/v1/chat/completions` remains a stateless compatibility endpoint. For native Antigravity agent sessions, use the authenticated session API. It keeps one `agy --input-format stream-json --output-format stream-json` process per API session and forwards its native NDJSON events without dropping tool lifecycle data.
+
+```bash
+# Start a session. Response contains the wrapper `id` and agy's `conversation_id` init event.
+curl -X POST http://localhost:8080/v1/sessions \
+  -H "Authorization: Bearer $OPENAI_API_KEY"
+
+# Send one turn. Response is application/x-ndjson and includes step_update tool events and a final result.
+curl -N -X POST http://localhost:8080/v1/sessions/<id>/turns \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"content":"List files in current directory."}'
+
+# Stop session and release its agy process.
+curl -X DELETE http://localhost:8080/v1/sessions/<id> \
+  -H "Authorization: Bearer $OPENAI_API_KEY"
+```
+
+The wrapper does not enable `--dangerously-skip-permissions`. `agy` keeps its permission policy; sandbox remains enabled by default. Native sessions are process-local: restart clears wrapper session IDs. The returned agy conversation ID is forwarded for future resume support, but this release does not persist or resume sessions after restart.
