@@ -43,7 +43,7 @@ func (a *AntigravityAdapter) CreateChatCompletion(req model.OpenAIChatCompletion
 		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "messages_required", Message: "messages is required"}
 	}
 	if req.Stream {
-		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "stream_not_supported", Message: "stream=true is not supported"}
+		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "use_stream_method", Message: "use StreamChatCompletion for stream=true"}
 	}
 	if req.N < 0 {
 		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "n_not_supported", Message: "n<0 is not supported"}
@@ -200,6 +200,63 @@ func (a *AntigravityAdapter) CreateResponse(req model.OpenAIResponseRequest) (mo
 			},
 		},
 		OutputText: answer,
+		Usage: model.OpenAIUsage{
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+			TotalTokens:      promptTokens + completionTokens,
+		},
+	}, nil
+}
+
+// StreamChatCompletion streams chat completion deltas from agy stream-json.
+func (a *AntigravityAdapter) StreamChatCompletion(ctx context.Context, req model.OpenAIChatCompletionRequest, emit func(string) error) (model.OpenAIChatCompletionResponse, error) {
+	if a.geminiService == nil {
+		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "Antigravity backend is not initialized"}
+	}
+	streaming, ok := a.geminiService.(interface {
+		Stream(context.Context, string, string, func(gemini_impl.StreamEvent) error) (*model.GeminiStatus, error)
+	})
+	if !ok {
+		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 501, Type: "server_error", Code: "stream_not_supported", Message: "Antigravity backend does not support incremental streaming"}
+	}
+	if len(req.Messages) == 0 {
+		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "messages_required", Message: "messages is required"}
+	}
+	modelName := req.Model
+	if modelName == "" {
+		modelName = "antigravity-default"
+	}
+	prompt := buildPromptFromMessages(req.Messages)
+	var answer strings.Builder
+	status, err := streaming.Stream(ctx, prompt, modelName, func(event gemini_impl.StreamEvent) error {
+		if event.Delta == "" {
+			return nil
+		}
+		answer.WriteString(event.Delta)
+		return emit(event.Delta)
+	})
+	if err != nil {
+		return model.OpenAIChatCompletionResponse{}, convertAntigravityError(err, status)
+	}
+	resolvedModel := modelName
+	if status != nil && strings.TrimSpace(status.Model) != "" {
+		resolvedModel = status.Model
+	}
+	now := time.Now().Unix()
+	promptTokens := estimateTokens(prompt)
+	completionTokens := estimateTokens(answer.String())
+	return model.OpenAIChatCompletionResponse{
+		ID:      fmt.Sprintf("chatcmpl-%d", now),
+		Object:  "chat.completion",
+		Created: now,
+		Model:   resolvedModel,
+		Choices: []model.OpenAIChatCompletionChoice{
+			{
+				Index:        0,
+				Message:      model.OpenAIChatMessage{Role: "assistant", Content: answer.String()},
+				FinishReason: "stop",
+			},
+		},
 		Usage: model.OpenAIUsage{
 			PromptTokens:     promptTokens,
 			CompletionTokens: completionTokens,

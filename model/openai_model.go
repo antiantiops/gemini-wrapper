@@ -110,6 +110,27 @@ type OpenAIResponseOutput struct {
 	Content []OpenAIResponseContent `json:"content,omitempty"`
 }
 
+// Streaming chat completion types
+type OpenAIChatDelta struct {
+	Role    string `json:"role,omitempty"`
+	Content string `json:"content,omitempty"`
+}
+
+type OpenAIChatCompletionStreamChoice struct {
+	Index        int             `json:"index"`
+	Delta        OpenAIChatDelta `json:"delta"`
+	FinishReason *string         `json:"finish_reason"`
+}
+
+type OpenAIChatCompletionStreamChunk struct {
+	ID      string                             `json:"id"`
+	Object  string                             `json:"object"`
+	Created int64                              `json:"created"`
+	Model   string                             `json:"model"`
+	Choices []OpenAIChatCompletionStreamChoice `json:"choices"`
+	Usage   *OpenAIUsage                       `json:"usage,omitempty"`
+}
+
 type OpenAIResponse struct {
 	ID         string                 `json:"id"`
 	Object     string                 `json:"object"`
