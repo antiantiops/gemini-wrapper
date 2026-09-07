@@ -37,12 +37,107 @@ func (h *OpenAIHandler) CreateChatCompletion(c *echo.Context) error {
 		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "invalid_json", Message: "Invalid JSON body"})
 	}
 
+	if req.Stream {
+		return h.streamChatCompletion(c, req)
+	}
 	resp, err := h.service.CreateChatCompletion(req)
 	if err != nil {
 		return writeOpenAIError(c, err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
+
+func (h *OpenAIHandler) streamChatCompletion(c *echo.Context, req model.OpenAIChatCompletionRequest) error {
+	r := c.Response()
+	flusher, ok := r.(http.Flusher)
+	if !ok {
+		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 500, Type: "server_error", Code: "streaming_unavailable", Message: "Response writer does not support streaming"})
+	}
+	r.Header().Set(echo.HeaderContentType, "text/event-stream")
+	r.Header().Set("Cache-Control", "no-cache")
+	r.Header().Set("Connection", "keep-alive")
+	r.WriteHeader(http.StatusOK)
+
+	completionID := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
+	modelName := req.Model
+	if modelName == "" {
+		modelName = "antigravity-default"
+	}
+
+	// Send initial chunk with role
+	initialChunk := model.OpenAIChatCompletionStreamChunk{
+		ID:      completionID,
+		Object:  "chat.completion.chunk",
+		Created: time.Now().Unix(),
+		Model:   modelName,
+		Choices: []model.OpenAIChatCompletionStreamChoice{
+			{
+				Index: 0,
+				Delta: model.OpenAIChatDelta{Role: "assistant"},
+			},
+		},
+	}
+	body, _ := json.Marshal(initialChunk)
+	if _, err := fmt.Fprintf(r, "data: %s\n\n", body); err != nil {
+		return err
+	}
+	flusher.Flush()
+
+	resp, err := h.service.StreamChatCompletion(c.Request().Context(), req, func(delta string) error {
+		chunk := model.OpenAIChatCompletionStreamChunk{
+			ID:      completionID,
+			Object:  "chat.completion.chunk",
+			Created: time.Now().Unix(),
+			Model:   modelName,
+			Choices: []model.OpenAIChatCompletionStreamChoice{
+				{
+					Index: 0,
+					Delta: model.OpenAIChatDelta{Content: delta},
+				},
+			},
+		}
+		chunkBody, _ := json.Marshal(chunk)
+		if _, err := fmt.Fprintf(r, "data: %s\n\n", chunkBody); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	})
+	if err != nil {
+		errPayload := map[string]interface{}{"error": map[string]interface{}{"message": err.Error(), "type": "server_error", "code": "stream_error"}}
+		if apiErr, ok := err.(*openai.APIError); ok {
+			errPayload["error"].(map[string]interface{})["message"] = apiErr.Message
+		}
+		errBody, _ := json.Marshal(errPayload)
+		fmt.Fprintf(r, "data: %s\n\n", errBody)
+		fmt.Fprint(r, "data: [DONE]\n\n")
+		flusher.Flush()
+		return nil
+	}
+
+	// Final chunk with finish_reason and usage
+	finalChunk := model.OpenAIChatCompletionStreamChunk{
+		ID:      completionID,
+		Object:  "chat.completion.chunk",
+		Created: time.Now().Unix(),
+		Model:   resp.Model,
+		Choices: []model.OpenAIChatCompletionStreamChoice{
+			{
+				Index:        0,
+				Delta:        model.OpenAIChatDelta{},
+				FinishReason: stringPtr("stop"),
+			},
+		},
+		Usage: &resp.Usage,
+	}
+	finalBody, _ := json.Marshal(finalChunk)
+	fmt.Fprintf(r, "data: %s\n\n", finalBody)
+	fmt.Fprint(r, "data: [DONE]\n\n")
+	flusher.Flush()
+	return nil
+}
+
+func stringPtr(s string) *string { return &s }
 
 func (h *OpenAIHandler) CreateCompletion(c *echo.Context) error {
 	if h == nil || h.service == nil {

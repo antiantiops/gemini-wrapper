@@ -8,6 +8,7 @@ import (
 type Service interface {
 	ListModels() model.OpenAIModelListResponse
 	CreateChatCompletion(req model.OpenAIChatCompletionRequest) (model.OpenAIChatCompletionResponse, error)
+	StreamChatCompletion(ctx context.Context, req model.OpenAIChatCompletionRequest, emit func(delta string) error) (model.OpenAIChatCompletionResponse, error)
 	CreateCompletion(req model.OpenAICompletionRequest) (model.OpenAICompletionResponse, error)
 	CreateResponse(req model.OpenAIResponseRequest) (model.OpenAIResponse, error)
 	StreamResponse(ctx context.Context, req model.OpenAIResponseRequest, emit func(string) error) (model.OpenAIResponse, error)
