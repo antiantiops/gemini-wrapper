@@ -10,10 +10,11 @@ import (
 )
 
 type API struct {
-	Echo              *echo.Echo
+	Echo               *echo.Echo
 	AntigravityHandler *handler.AntigravityHandler
-	OpenAIHandler     *handler.OpenAIHandler
-	OpenAIAPIKey      string
+	OpenAIHandler      *handler.OpenAIHandler
+	SessionHandler     *handler.SessionHandler
+	OpenAIAPIKey       string
 }
 
 func (api *API) SetupRouter() {
@@ -36,5 +37,12 @@ func (api *API) SetupRouter() {
 		v1.POST("/chat/completions", api.OpenAIHandler.CreateChatCompletion)
 		v1.POST("/completions", api.OpenAIHandler.CreateCompletion)
 		v1.POST("/responses", api.OpenAIHandler.CreateResponse)
+		// Native sessions retain an agy process. Never expose process-backed
+		// routes when the optional compatibility API has no configured key.
+		if api.SessionHandler != nil && api.OpenAIAPIKey != "" {
+			v1.POST("/sessions", api.SessionHandler.Start)
+			v1.POST("/sessions/:id/turns", api.SessionHandler.Turn)
+			v1.DELETE("/sessions/:id", api.SessionHandler.Close)
+		}
 	}
 }

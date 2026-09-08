@@ -5,6 +5,7 @@ import (
 
 	"gemini-wrapper/handler"
 	"gemini-wrapper/router"
+	"gemini-wrapper/service/agy_session"
 	"gemini-wrapper/service/gemini/gemini_impl"
 	"gemini-wrapper/service/openai"
 
@@ -27,10 +28,14 @@ func main() {
 	openAIAdapter := openai.NewAntigravityAdapter(geminiService)
 	openAIHandler := handler.NewOpenAIHandler(openAIAdapter)
 
+	sessionManager := agy_session.NewManager()
+	defer sessionManager.CloseAll()
+
 	api := &router.API{
 		Echo:               e,
 		AntigravityHandler: geminiHandler,
 		OpenAIHandler:      openAIHandler,
+		SessionHandler:     handler.NewSessionHandler(sessionManager),
 		OpenAIAPIKey:       os.Getenv("OPENAI_API_KEY"),
 	}
 	api.SetupRouter()

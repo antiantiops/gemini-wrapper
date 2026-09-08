@@ -39,14 +39,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install into /usr/local/bin so `agy` is on PATH for both the build check and
 # at runtime (where HOME=/app, so the script's default ~/.local/bin is unusable).
 #
-# IMPORTANT: The install script skips download when the binary already exists.
-# We rm -f first so every build gets the latest version. The ARG below also
-# busts the Docker layer cache when the Release Watch workflow bumps the pin.
-ARG AGY_VERSION=latest
+# `stream-json` requires agy >= 1.1.8. The upstream installer publishes only
+# its current verified binary, so fail the image build instead of shipping an
+# incompatible CLI when it regresses below this floor.
+ARG AGY_MIN_VERSION=1.1.8
 RUN rm -f /usr/local/bin/agy && \
   curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin && \
-  /usr/local/bin/agy --version && \
-  echo "✓ Antigravity CLI installed successfully (expected: ${AGY_VERSION})"
+  AGY_VERSION="$(/usr/local/bin/agy --version)" && \
+  dpkg --compare-versions "$AGY_VERSION" ge "$AGY_MIN_VERSION" && \
+  echo "✓ Antigravity CLI installed successfully: $AGY_VERSION (minimum: ${AGY_MIN_VERSION})"
 
 # Set up working directory
 WORKDIR /app
