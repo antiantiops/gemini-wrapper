@@ -6,7 +6,7 @@
 
 A Go REST API wrapper for Google's Antigravity CLI (`agy`). Provides a simple HTTP interface (plus OpenAI- and Gemini-compatible endpoints) to interact with Antigravity models.
 
-> Backend: this image ships the **Antigravity CLI (`agy`)**, tested against **agy 1.0.6**. The wrapper invokes `agy --prompt "<question>"` (optionally with `--model`) in headless mode and returns the response.
+> Backend: this image ships the **Antigravity CLI (`agy`)**, requiring **agy 1.1.8+** for `stream-json` support. The wrapper invokes `agy --prompt "<question>"` (optionally with `--model`) in headless mode and returns the response.
 
 🐳 **Pre-built Docker images**: https://hub.docker.com/r/antiantiops/gemini-wrapper
 
@@ -169,7 +169,7 @@ Follow the on-screen prompts from `agy` to sign in. When the CLI shows a URL:
 5. **Go back to the container terminal** and paste the code
 6. **Press Enter** until the CLI confirms you are signed in
 
-> Note: the exact sign-in prompts depend on your `agy` version. This image is tested with **agy 1.0.6** — run `agy --help` and `agy install` inside the container if you need to (re)configure environment paths.
+> Note: the exact sign-in prompts depend on your `agy` version. This image requires **agy 1.1.8+** — run `agy --help` and `agy install` inside the container if you need to (re)configure environment paths.
 
 **What happened:**
 - You authenticated inside the container
@@ -384,7 +384,7 @@ If `OPENAI_API_KEY` is not set, you can remove the `Authorization` header.
 
 ## 🎯 Available Models
 
-These are the exact model names accepted by `agy 1.0.6` (run `agy models` inside the container to confirm for your version):
+These are model names accepted by the bundled `agy 1.1.8+` (run `agy models` inside the container to confirm for your version):
 
 | Model (`agy` display name) | Notes |
 |----------------------------|-------|
@@ -444,7 +444,7 @@ The wrapper invokes the Antigravity CLI in headless mode. These environment vari
 - `ANTIGRAVITY_SKIP_PERMISSIONS` (default `false`) — when truthy, passes `--dangerously-skip-permissions` so tool-permission prompts are auto-approved (avoids blocking on stdin). Security sensitive: only enable for trusted, headless use.
 
 > Notes:
-> - `agy 1.0.6` does not support an `--output-format` flag; the wrapper parses plain-text output (and JSON when present).
+> - Native sessions and OpenAI streaming require `agy 1.1.8+`, which supports `--input-format stream-json --output-format stream-json`.
 > - The wrapper calls `agy --prompt "<question>"` and adds `--model "<resolved name>"` only when a recognized model/alias is supplied.
 
 ---
@@ -495,7 +495,7 @@ docker run -d -p 8080:8080 \
 
 ### Native `agy` Agent Sessions
 
-`/v1/chat/completions` remains a stateless compatibility endpoint. For native Antigravity agent sessions, use the authenticated session API. It keeps one `agy --input-format stream-json --output-format stream-json` process per API session and forwards its native NDJSON events without dropping tool lifecycle data.
+`/v1/chat/completions` remains a stateless compatibility endpoint. Native session routes are registered only when `OPENAI_API_KEY` is configured; otherwise `/v1/sessions*` returns `404`. The session API keeps one `agy --input-format stream-json --output-format stream-json` process per API session and forwards its native NDJSON events without dropping tool lifecycle data.
 
 ```bash
 # Start a session. Response contains the wrapper `id` and agy's `conversation_id` init event.

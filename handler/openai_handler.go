@@ -48,6 +48,15 @@ func (h *OpenAIHandler) CreateChatCompletion(c *echo.Context) error {
 }
 
 func (h *OpenAIHandler) streamChatCompletion(c *echo.Context, req model.OpenAIChatCompletionRequest) error {
+	if len(req.Messages) == 0 {
+		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "messages_required", Message: "messages is required"})
+	}
+	if req.N < 0 {
+		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "n_not_supported", Message: "n<0 is not supported"})
+	}
+	if req.N > 1 {
+		return writeOpenAIError(c, &openai.APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "n_not_supported", Message: "n>1 is not supported"})
+	}
 	r := c.Response()
 	flusher, ok := r.(http.Flusher)
 	if !ok {

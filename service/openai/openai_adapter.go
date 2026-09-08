@@ -213,6 +213,12 @@ func (a *AntigravityAdapter) StreamChatCompletion(ctx context.Context, req model
 	if a.geminiService == nil {
 		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 500, Type: "server_error", Code: "backend_unavailable", Message: "Antigravity backend is not initialized"}
 	}
+	if req.N < 0 {
+		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "n_not_supported", Message: "n<0 is not supported"}
+	}
+	if req.N > 1 {
+		return model.OpenAIChatCompletionResponse{}, &APIError{HTTPStatus: 400, Type: "invalid_request_error", Code: "n_not_supported", Message: "n>1 is not supported"}
+	}
 	streaming, ok := a.geminiService.(interface {
 		Stream(context.Context, string, string, func(gemini_impl.StreamEvent) error) (*model.GeminiStatus, error)
 	})
