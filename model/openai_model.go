@@ -25,9 +25,35 @@ type OpenAIModelListResponse struct {
 }
 
 type OpenAIChatMessage struct {
-	Role    string      `json:"role"`
-	Content interface{} `json:"content"`
-	Name    string      `json:"name,omitempty"`
+	Role       string           `json:"role"`
+	Content    interface{}      `json:"content"`
+	Name       string           `json:"name,omitempty"`
+	ToolCalls  []OpenAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+}
+
+// Tool calling types
+type OpenAIFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type OpenAIToolCall struct {
+	Index    *int               `json:"index,omitempty"`
+	ID       string             `json:"id,omitempty"`
+	Type     string             `json:"type,omitempty"`
+	Function OpenAIFunctionCall `json:"function"`
+}
+
+type OpenAIFunctionDefinition struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	Parameters  interface{} `json:"parameters,omitempty"`
+}
+
+type OpenAITool struct {
+	Type     string                   `json:"type"`
+	Function OpenAIFunctionDefinition `json:"function"`
 }
 
 type OpenAIChatCompletionRequest struct {
@@ -40,6 +66,8 @@ type OpenAIChatCompletionRequest struct {
 	Stop        interface{}         `json:"stop,omitempty"`
 	MaxTokens   int                 `json:"max_tokens,omitempty"`
 	User        string              `json:"user,omitempty"`
+	Tools       []OpenAITool        `json:"tools,omitempty"`
+	ToolChoice  interface{}         `json:"tool_choice,omitempty"`
 }
 
 type OpenAIChatCompletionChoice struct {
@@ -112,8 +140,9 @@ type OpenAIResponseOutput struct {
 
 // Streaming chat completion types
 type OpenAIChatDelta struct {
-	Role    string `json:"role,omitempty"`
-	Content string `json:"content,omitempty"`
+	Role      string           `json:"role,omitempty"`
+	Content   string           `json:"content,omitempty"`
+	ToolCalls []OpenAIToolCall `json:"tool_calls,omitempty"`
 }
 
 type OpenAIChatCompletionStreamChoice struct {

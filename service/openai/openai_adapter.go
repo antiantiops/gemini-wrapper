@@ -2,8 +2,10 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -57,7 +59,7 @@ func (a *AntigravityAdapter) CreateChatCompletion(req model.OpenAIChatCompletion
 		modelName = "antigravity-default"
 	}
 
-	prompt := buildPromptFromMessages(req.Messages)
+	prompt := buildPromptFromRequest(req)
 	answer, status, err := a.geminiService.Ask(prompt, modelName)
 	if err != nil {
 		return model.OpenAIChatCompletionResponse{}, convertAntigravityError(err, status)
@@ -71,6 +73,17 @@ func (a *AntigravityAdapter) CreateChatCompletion(req model.OpenAIChatCompletion
 	promptTokens := estimateTokens(prompt)
 	completionTokens := estimateTokens(answer)
 
+	message := model.OpenAIChatMessage{
+		Role:    "assistant",
+		Content: answer,
+	}
+	finishReason := "stop"
+	if toolCalls, ok := parseToolCalls(answer); ok {
+		message.Content = nil
+		message.ToolCalls = toolCalls
+		finishReason = "tool_calls"
+	}
+
 	return model.OpenAIChatCompletionResponse{
 		ID:      fmt.Sprintf("chatcmpl-%d", now),
 		Object:  "chat.completion",
@@ -78,12 +91,9 @@ func (a *AntigravityAdapter) CreateChatCompletion(req model.OpenAIChatCompletion
 		Model:   resolvedModel,
 		Choices: []model.OpenAIChatCompletionChoice{
 			{
-				Index: 0,
-				Message: model.OpenAIChatMessage{
-					Role:    "assistant",
-					Content: answer,
-				},
-				FinishReason: "stop",
+				Index:        0,
+				Message:      message,
+				FinishReason: finishReason,
 			},
 		},
 		Usage: model.OpenAIUsage{
@@ -232,7 +242,7 @@ func (a *AntigravityAdapter) StreamChatCompletion(ctx context.Context, req model
 	if modelName == "" {
 		modelName = "antigravity-default"
 	}
-	prompt := buildPromptFromMessages(req.Messages)
+	prompt := buildPromptFromRequest(req)
 	var answer strings.Builder
 	status, err := streaming.Stream(ctx, prompt, modelName, func(event gemini_impl.StreamEvent) error {
 		if event.Delta == "" {
@@ -310,17 +320,183 @@ func (a *AntigravityAdapter) StreamResponse(ctx context.Context, req model.OpenA
 	return model.OpenAIResponse{ID: fmt.Sprintf("resp-%d", time.Now().UnixNano()), Object: "response", CreatedAt: now, Status: "completed", Model: modelName, Output: []model.OpenAIResponseOutput{{Type: "message", Role: "assistant", Content: []model.OpenAIResponseContent{{Type: "output_text", Text: answer.String()}}}}, OutputText: answer.String(), Usage: model.OpenAIUsage{PromptTokens: estimateTokens(prompt), CompletionTokens: estimateTokens(answer.String()), TotalTokens: estimateTokens(prompt) + estimateTokens(answer.String())}}, nil
 }
 
-func buildPromptFromMessages(messages []model.OpenAIChatMessage) string {
-	parts := make([]string, 0, len(messages))
-	for _, m := range messages {
+func buildPromptFromRequest(req model.OpenAIChatCompletionRequest) string {
+	parts := make([]string, 0, len(req.Messages)+1)
+	if len(req.Tools) > 0 {
+		toolsBytes, _ := json.Marshal(req.Tools)
+		sys := "SYSTEM INSTRUCTION FOR TOOL CALLING:\n" +
+			"You are an AI assistant with access to client tools:\n" +
+			string(toolsBytes) + "\n\n" +
+			"CRITICAL RULES:\n" +
+			"1. You MUST NOT attempt to execute tools or commands on your host system directly.\n" +
+			"2. If you need to use a tool, respond ONLY with a JSON code block in this format:\n" +
+			"```json\n" +
+			"{\n" +
+			"  \"tool_calls\": [\n" +
+			"    {\n" +
+			"      \"id\": \"call_1\",\n" +
+			"      \"type\": \"function\",\n" +
+			"      \"function\": {\n" +
+			"        \"name\": \"<tool_name>\",\n" +
+			"        \"arguments\": \"{\\\"param\\\": \\\"value\\\"}\"\n" +
+			"      }\n" +
+			"    }\n" +
+			"  ]\n" +
+			"}\n" +
+			"```\n" +
+			"3. Do NOT output conversational text or explanations around the JSON block when calling tools.\n" +
+			"4. If no tool is needed, respond normally with plain text."
+		parts = append(parts, sys)
+	}
+	for _, m := range req.Messages {
 		role := strings.TrimSpace(m.Role)
 		if role == "" {
 			role = "user"
 		}
 		content := flattenMessageContent(m.Content)
+		if len(m.ToolCalls) > 0 {
+			callsBytes, _ := json.Marshal(m.ToolCalls)
+			content = fmt.Sprintf("[assistant tool calls] %s", string(callsBytes))
+		}
+		if m.ToolCallID != "" {
+			content = fmt.Sprintf("[tool result for %s] %s", m.ToolCallID, content)
+		}
 		parts = append(parts, fmt.Sprintf("%s: %s", role, content))
 	}
-	return strings.Join(parts, "\n")
+	return strings.Join(parts, "\n\n")
+}
+
+func buildPromptFromMessages(messages []model.OpenAIChatMessage) string {
+	return buildPromptFromRequest(model.OpenAIChatCompletionRequest{Messages: messages})
+}
+
+var toolCallRegex = regexp.MustCompile("(?s)```(?:json)?\\s*([\\{\\[].*?[\\}\\]])\\s*```")
+
+func parseToolCalls(rawText string) ([]model.OpenAIToolCall, bool) {
+	trimmed := strings.TrimSpace(rawText)
+	target := trimmed
+	if matches := toolCallRegex.FindStringSubmatch(trimmed); len(matches) > 1 {
+		target = strings.TrimSpace(matches[1])
+	}
+
+	var envelope struct {
+		ToolCalls []struct {
+			ID       string      `json:"id"`
+			Type     string      `json:"type"`
+			Name     string      `json:"name"`
+			Function *struct {
+				Name      string      `json:"name"`
+				Arguments interface{} `json:"arguments"`
+			} `json:"function"`
+			Arguments interface{} `json:"arguments"`
+		} `json:"tool_calls"`
+	}
+
+	if err := json.Unmarshal([]byte(target), &envelope); err == nil && len(envelope.ToolCalls) > 0 {
+		var result []model.OpenAIToolCall
+		for i, tc := range envelope.ToolCalls {
+			name := tc.Name
+			var argsStr string
+			if tc.Function != nil {
+				if tc.Function.Name != "" {
+					name = tc.Function.Name
+				}
+				switch a := tc.Function.Arguments.(type) {
+				case string:
+					argsStr = a
+				default:
+					b, _ := json.Marshal(a)
+					argsStr = string(b)
+				}
+			} else if tc.Arguments != nil {
+				switch a := tc.Arguments.(type) {
+				case string:
+					argsStr = a
+				default:
+					b, _ := json.Marshal(a)
+					argsStr = string(b)
+				}
+			}
+			id := tc.ID
+			if id == "" {
+				id = fmt.Sprintf("call_%d", i+1)
+			}
+			typ := tc.Type
+			if typ == "" {
+				typ = "function"
+			}
+			idx := i
+			result = append(result, model.OpenAIToolCall{
+				Index: &idx,
+				ID:    id,
+				Type:  typ,
+				Function: model.OpenAIFunctionCall{
+					Name:      name,
+					Arguments: argsStr,
+				},
+			})
+		}
+		return result, true
+	}
+
+	var directList []struct {
+		ID       string      `json:"id"`
+		Type     string      `json:"type"`
+		Name     string      `json:"name"`
+		Function *struct {
+			Name      string      `json:"name"`
+			Arguments interface{} `json:"arguments"`
+		} `json:"function"`
+		Arguments interface{} `json:"arguments"`
+	}
+	if err := json.Unmarshal([]byte(target), &directList); err == nil && len(directList) > 0 && (directList[0].Name != "" || (directList[0].Function != nil && directList[0].Function.Name != "")) {
+		var result []model.OpenAIToolCall
+		for i, tc := range directList {
+			name := tc.Name
+			var argsStr string
+			if tc.Function != nil {
+				if tc.Function.Name != "" {
+					name = tc.Function.Name
+				}
+				switch a := tc.Function.Arguments.(type) {
+				case string:
+					argsStr = a
+				default:
+					b, _ := json.Marshal(a)
+					argsStr = string(b)
+				}
+			} else if tc.Arguments != nil {
+				switch a := tc.Arguments.(type) {
+				case string:
+					argsStr = a
+				default:
+					b, _ := json.Marshal(a)
+					argsStr = string(b)
+				}
+			}
+			id := tc.ID
+			if id == "" {
+				id = fmt.Sprintf("call_%d", i+1)
+			}
+			typ := tc.Type
+			if typ == "" {
+				typ = "function"
+			}
+			idx := i
+			result = append(result, model.OpenAIToolCall{
+				Index: &idx,
+				ID:    id,
+				Type:  typ,
+				Function: model.OpenAIFunctionCall{
+					Name:      name,
+					Arguments: argsStr,
+				},
+			})
+		}
+		return result, true
+	}
+
+	return nil, false
 }
 
 // flattenMessageContent accepts the OpenAI chat `content` field, which may be a
