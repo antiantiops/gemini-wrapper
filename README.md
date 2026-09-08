@@ -6,7 +6,7 @@
 
 A Go REST API wrapper for Google's Antigravity CLI (`agy`). Provides a simple HTTP interface (plus OpenAI- and Gemini-compatible endpoints) to interact with Antigravity models.
 
-> Backend: this image ships the **Antigravity CLI (`agy`)**, requiring **agy 1.1.8+** for `stream-json` support. The wrapper invokes `agy --prompt "<question>"` (optionally with `--model`) in headless mode and returns the response.
+> Backend: this image validates **Antigravity CLI (`agy`) 1.1.8+** at image build time for `stream-json` support. The wrapper invokes `agy --prompt "<question>"` (optionally with `--model`) in headless mode and returns the response.
 
 🐳 **Pre-built Docker images**: https://hub.docker.com/r/antiantiops/gemini-wrapper
 
