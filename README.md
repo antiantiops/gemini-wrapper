@@ -354,12 +354,24 @@ Check OpenAI-compatible endpoints:
 curl http://localhost:8080/v1/models \
   -H "Authorization: Bearer sk-local-demo"
 
-# 2) Chat completion
+# 2) Chat completion (supports both streaming and non-streaming)
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-local-demo" \
   -d '{
     "model": "Gemini 3.8 Flash (Medium)",
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ]
+  }'
+
+# Streaming SSE chunk output:
+curl -N -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-local-demo" \
+  -d '{
+    "model": "Gemini 3.8 Flash (Medium)",
+    "stream": true,
     "messages": [
       {"role": "user", "content": "Hello"}
     ]
