@@ -454,6 +454,9 @@ const defaultModelSentinel = "antigravity-default"
 // 1.0.6 (see `agy models`). Matching is case-insensitive against the canonical
 // name as well as a set of convenience aliases.
 var knownAgyModels = []string{
+	"Gemini 3.8 Flash (Medium)",
+	"Gemini 3.8 Flash (High)",
+	"Gemini 3.8 Flash (Low)",
 	"Gemini 3.7 Flash (Medium)",
 	"Gemini 3.7 Flash (High)",
 	"Gemini 3.7 Flash (Low)",
@@ -468,18 +471,23 @@ var knownAgyModels = []string{
 // agy silently falls back to its default model when given an unknown name, so
 // resolving aliases here prevents callers from silently getting the wrong model.
 var modelAliases = map[string]string{
-	"gemini-3.7-flash":       "Gemini 3.7 Flash (Medium)",
-	"gemini-flash":           "Gemini 3.7 Flash (Medium)",
-	"gemini-3.7-flash-high":  "Gemini 3.7 Flash (High)",
-	"gemini-flash-high":      "Gemini 3.7 Flash (High)",
-	"gemini-3.1-pro":    "Gemini 3.1 Pro (High)",
-	"gemini-pro":        "Gemini 3.1 Pro (High)",
-	"claude-sonnet-4.6": "Claude Sonnet 4.6 (Thinking)",
-	"claude-sonnet":     "Claude Sonnet 4.6 (Thinking)",
-	"claude-opus-4.6":   "Claude Opus 4.6 (Thinking)",
-	"claude-opus":       "Claude Opus 4.6 (Thinking)",
-	"gpt-oss-120b":      "GPT-OSS 120B (Medium)",
-	"gpt-oss":           "GPT-OSS 120B (Medium)",
+	"gemini-3.8-flash":        "Gemini 3.8 Flash (Medium)",
+	"gemini-3.8-flash-medium": "Gemini 3.8 Flash (Medium)",
+	"gemini-3.8-flash-high":   "Gemini 3.8 Flash (High)",
+	"gemini-3.8-flash-low":    "Gemini 3.8 Flash (Low)",
+	"gemini-flash":            "Gemini 3.8 Flash (Medium)",
+	"gemini-flash-high":       "Gemini 3.8 Flash (High)",
+	"gemini-flash-low":        "Gemini 3.8 Flash (Low)",
+	"gemini-3.7-flash":        "Gemini 3.7 Flash (Medium)",
+	"gemini-3.7-flash-high":   "Gemini 3.7 Flash (High)",
+	"gemini-3.1-pro":          "Gemini 3.1 Pro (High)",
+	"gemini-pro":              "Gemini 3.1 Pro (High)",
+	"claude-sonnet-4.6":       "Claude Sonnet 4.6 (Thinking)",
+	"claude-sonnet":           "Claude Sonnet 4.6 (Thinking)",
+	"claude-opus-4.6":         "Claude Opus 4.6 (Thinking)",
+	"claude-opus":             "Claude Opus 4.6 (Thinking)",
+	"gpt-oss-120b":            "GPT-OSS 120B (Medium)",
+	"gpt-oss":                 "GPT-OSS 120B (Medium)",
 }
 
 // resolveModelName maps a caller-supplied model name to an exact agy display

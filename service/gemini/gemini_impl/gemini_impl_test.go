@@ -99,8 +99,9 @@ func TestResolveModelName(t *testing.T) {
 		{"case-insensitive display name", "claude opus 4.6 (thinking)", "Claude Opus 4.6 (Thinking)", true},
 		{"alias", "claude-opus-4.6", "Claude Opus 4.6 (Thinking)", true},
 		{"alias gpt-oss", "gpt-oss", "GPT-OSS 120B (Medium)", true},
-		{"alias gemini-3.7-flash-high", "gemini-3.7-flash-high", "Gemini 3.7 Flash (High)", true},
-		{"alias gemini-flash-high", "gemini-flash-high", "Gemini 3.7 Flash (High)", true},
+		{"alias gemini-3.8-flash-high", "gemini-3.8-flash-high", "Gemini 3.8 Flash (High)", true},
+		{"alias gemini-flash-high", "gemini-flash-high", "Gemini 3.8 Flash (High)", true},
+		{"alias gemini-flash", "gemini-flash", "Gemini 3.8 Flash (Medium)", true},
 		{"unknown forwarded as-is", "totally-made-up", "totally-made-up", true},
 	}
 
