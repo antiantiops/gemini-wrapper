@@ -71,7 +71,6 @@ func (a *AntigravityAdapter) CreateChatCompletion(req model.OpenAIChatCompletion
 
 	now := time.Now().Unix()
 	promptTokens := estimateTokens(prompt)
-	completionTokens := estimateTokens(answer)
 
 	tc := parseToolChoice(req.ToolChoice)
 	var toolCalls []model.OpenAIToolCall
@@ -97,6 +96,8 @@ func (a *AntigravityAdapter) CreateChatCompletion(req model.OpenAIChatCompletion
 	} else {
 		toolCalls, ok = parseToolCalls(answer)
 	}
+
+	completionTokens := estimateTokens(answer)
 
 	message := model.OpenAIChatMessage{
 		Role:    "assistant",
@@ -294,7 +295,6 @@ func (a *AntigravityAdapter) StreamChatCompletion(ctx context.Context, req model
 	}
 	now := time.Now().Unix()
 	promptTokens := estimateTokens(prompt)
-	completionTokens := estimateTokens(answer.String())
 	tc := parseToolChoice(req.ToolChoice)
 	var toolCalls []model.OpenAIToolCall
 	ansStr := answer.String()
@@ -327,6 +327,8 @@ func (a *AntigravityAdapter) StreamChatCompletion(ctx context.Context, req model
 	} else {
 		toolCalls, ok = parseToolCalls(ansStr)
 	}
+
+	completionTokens := estimateTokens(ansStr)
 
 	message := model.OpenAIChatMessage{Role: "assistant", Content: ansStr}
 	finishReason := "stop"
@@ -568,13 +570,16 @@ func parseToolCalls(rawText string) ([]model.OpenAIToolCall, bool) {
 
 	if err := json.Unmarshal([]byte(target), &envelope); err == nil && len(envelope.ToolCalls) > 0 {
 		var result []model.OpenAIToolCall
-		for i, tc := range envelope.ToolCalls {
-			name := tc.Name
+		for _, tc := range envelope.ToolCalls {
+			name := strings.TrimSpace(tc.Name)
+			if tc.Function != nil && strings.TrimSpace(tc.Function.Name) != "" {
+				name = strings.TrimSpace(tc.Function.Name)
+			}
+			if name == "" || name == "<tool_name>" {
+				continue
+			}
 			var argsStr string
 			if tc.Function != nil {
-				if tc.Function.Name != "" {
-					name = tc.Function.Name
-				}
 				switch a := tc.Function.Arguments.(type) {
 				case string:
 					argsStr = a
@@ -593,13 +598,13 @@ func parseToolCalls(rawText string) ([]model.OpenAIToolCall, bool) {
 			}
 			id := tc.ID
 			if id == "" {
-				id = fmt.Sprintf("call_%d", i+1)
+				id = fmt.Sprintf("call_%d", len(result)+1)
 			}
 			typ := tc.Type
 			if typ == "" {
 				typ = "function"
 			}
-			idx := i
+			idx := len(result)
 			result = append(result, model.OpenAIToolCall{
 				Index: &idx,
 				ID:    id,
@@ -610,7 +615,9 @@ func parseToolCalls(rawText string) ([]model.OpenAIToolCall, bool) {
 				},
 			})
 		}
-		return result, true
+		if len(result) > 0 {
+			return result, true
+		}
 	}
 
 	var directList []struct {
@@ -623,15 +630,18 @@ func parseToolCalls(rawText string) ([]model.OpenAIToolCall, bool) {
 		} `json:"function"`
 		Arguments interface{} `json:"arguments"`
 	}
-	if err := json.Unmarshal([]byte(target), &directList); err == nil && len(directList) > 0 && (directList[0].Name != "" || (directList[0].Function != nil && directList[0].Function.Name != "")) {
+	if err := json.Unmarshal([]byte(target), &directList); err == nil && len(directList) > 0 {
 		var result []model.OpenAIToolCall
-		for i, tc := range directList {
-			name := tc.Name
+		for _, tc := range directList {
+			name := strings.TrimSpace(tc.Name)
+			if tc.Function != nil && strings.TrimSpace(tc.Function.Name) != "" {
+				name = strings.TrimSpace(tc.Function.Name)
+			}
+			if name == "" || name == "<tool_name>" {
+				continue
+			}
 			var argsStr string
 			if tc.Function != nil {
-				if tc.Function.Name != "" {
-					name = tc.Function.Name
-				}
 				switch a := tc.Function.Arguments.(type) {
 				case string:
 					argsStr = a
@@ -650,13 +660,13 @@ func parseToolCalls(rawText string) ([]model.OpenAIToolCall, bool) {
 			}
 			id := tc.ID
 			if id == "" {
-				id = fmt.Sprintf("call_%d", i+1)
+				id = fmt.Sprintf("call_%d", len(result)+1)
 			}
 			typ := tc.Type
 			if typ == "" {
 				typ = "function"
 			}
-			idx := i
+			idx := len(result)
 			result = append(result, model.OpenAIToolCall{
 				Index: &idx,
 				ID:    id,
@@ -667,7 +677,9 @@ func parseToolCalls(rawText string) ([]model.OpenAIToolCall, bool) {
 				},
 			})
 		}
-		return result, true
+		if len(result) > 0 {
+			return result, true
+		}
 	}
 
 	return nil, false

@@ -313,15 +313,20 @@ func TestBuildPromptFromRequestWithTools(t *testing.T) {
 	}
 }
 
-func TestParseToolCallsWithoutCodeFence(t *testing.T) {
-	calls, ok := parseToolCalls(`{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\"filePath\":\"README.md\"}"}}]}`)
-	if !ok || len(calls) != 1 {
-		t.Fatalf("expected one tool call, got ok=%v calls=%v", ok, calls)
+func TestParseToolCallsIgnoresPlaceholdersAndEmpty(t *testing.T) {
+	raw := "```json\n{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"<tool_name>\", \"arguments\": \"{}\"}}]}\n```"
+	calls, ok := parseToolCalls(raw)
+	if ok || len(calls) != 0 {
+		t.Fatalf("expected placeholder <tool_name> to be ignored, got ok=%v, calls=%v", ok, calls)
 	}
-	if calls[0].Function.Arguments != `{"filePath":"README.md"}` {
-		t.Fatalf("unexpected arguments: %q", calls[0].Function.Arguments)
+
+	rawEmpty := "```json\n{\"tool_calls\": [{\"id\": \"call_2\", \"type\": \"function\", \"function\": {\"name\": \"   \", \"arguments\": \"{}\"}}]}\n```"
+	callsEmpty, okEmpty := parseToolCalls(rawEmpty)
+	if okEmpty || len(callsEmpty) != 0 {
+		t.Fatalf("expected empty name to be ignored, got ok=%v, calls=%v", okEmpty, callsEmpty)
 	}
 }
+
 
 func TestParseToolChoice(t *testing.T) {
 	if cfg := parseToolChoice(nil); cfg.mode != "auto" {
