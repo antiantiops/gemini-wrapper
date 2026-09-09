@@ -244,12 +244,19 @@ func (a *AntigravityAdapter) StreamChatCompletion(ctx context.Context, req model
 	}
 	prompt := buildPromptFromRequest(req)
 	var answer strings.Builder
+	// Tool-call JSON cannot be sent as content deltas: VS Code renders it as text
+	// and never dispatches its client-side tool. Buffer every tools request, then
+	// classify final output before emitting a protocol-compliant SSE chunk.
+	streamText := len(req.Tools) == 0
 	status, err := streaming.Stream(ctx, prompt, modelName, func(event gemini_impl.StreamEvent) error {
 		if event.Delta == "" {
 			return nil
 		}
 		answer.WriteString(event.Delta)
-		return emit(event.Delta)
+		if streamText {
+			return emit(event.Delta)
+		}
+		return nil
 	})
 	if err != nil {
 		return model.OpenAIChatCompletionResponse{}, convertAntigravityError(err, status)
@@ -261,6 +268,13 @@ func (a *AntigravityAdapter) StreamChatCompletion(ctx context.Context, req model
 	now := time.Now().Unix()
 	promptTokens := estimateTokens(prompt)
 	completionTokens := estimateTokens(answer.String())
+	message := model.OpenAIChatMessage{Role: "assistant", Content: answer.String()}
+	finishReason := "stop"
+	if toolCalls, ok := parseToolCalls(answer.String()); ok {
+		message.Content = nil
+		message.ToolCalls = toolCalls
+		finishReason = "tool_calls"
+	}
 	return model.OpenAIChatCompletionResponse{
 		ID:      fmt.Sprintf("chatcmpl-%d", now),
 		Object:  "chat.completion",
@@ -269,8 +283,8 @@ func (a *AntigravityAdapter) StreamChatCompletion(ctx context.Context, req model
 		Choices: []model.OpenAIChatCompletionChoice{
 			{
 				Index:        0,
-				Message:      model.OpenAIChatMessage{Role: "assistant", Content: answer.String()},
-				FinishReason: "stop",
+				Message:      message,
+				FinishReason: finishReason,
 			},
 		},
 		Usage: model.OpenAIUsage{
@@ -370,20 +384,19 @@ func buildPromptFromMessages(messages []model.OpenAIChatMessage) string {
 	return buildPromptFromRequest(model.OpenAIChatCompletionRequest{Messages: messages})
 }
 
-var toolCallRegex = regexp.MustCompile("(?s)```(?:json)?\\s*([\\{\\[].*?[\\}\\]])\\s*```")
+var toolCallRegex = regexp.MustCompile("(?s)^```(?:json)?\\s*(.*?)\\s*```$")
 
 func parseToolCalls(rawText string) ([]model.OpenAIToolCall, bool) {
-	trimmed := strings.TrimSpace(rawText)
-	target := trimmed
-	if matches := toolCallRegex.FindStringSubmatch(trimmed); len(matches) > 1 {
+	target := strings.TrimSpace(rawText)
+	if matches := toolCallRegex.FindStringSubmatch(target); len(matches) == 2 {
 		target = strings.TrimSpace(matches[1])
 	}
 
 	var envelope struct {
 		ToolCalls []struct {
-			ID       string      `json:"id"`
-			Type     string      `json:"type"`
-			Name     string      `json:"name"`
+			ID       string `json:"id"`
+			Type     string `json:"type"`
+			Name     string `json:"name"`
 			Function *struct {
 				Name      string      `json:"name"`
 				Arguments interface{} `json:"arguments"`
@@ -440,9 +453,9 @@ func parseToolCalls(rawText string) ([]model.OpenAIToolCall, bool) {
 	}
 
 	var directList []struct {
-		ID       string      `json:"id"`
-		Type     string      `json:"type"`
-		Name     string      `json:"name"`
+		ID       string `json:"id"`
+		Type     string `json:"type"`
+		Name     string `json:"name"`
 		Function *struct {
 			Name      string      `json:"name"`
 			Arguments interface{} `json:"arguments"`

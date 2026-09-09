@@ -250,7 +250,6 @@ func TestCreateChatCompletionUsesResolvedModelFromStatus(t *testing.T) {
 	}
 }
 
-
 func TestParseToolCalls(t *testing.T) {
 	raw := "```json\n{\"tool_calls\": [{\"id\": \"call_123\", \"type\": \"function\", \"function\": {\"name\": \"read_file\", \"arguments\": \"{\\\"path\\\": \\\"README.md\\\"}\"}}]}\n```"
 	calls, ok := parseToolCalls(raw)
@@ -306,10 +305,20 @@ func TestBuildPromptFromRequestWithTools(t *testing.T) {
 	}
 
 	prompt := buildPromptFromRequest(req)
-	if !json.Valid([]byte("{}")) {
-		t.Fatal("json invalid")
+	if !strings.Contains(prompt, `"name":"read_file"`) {
+		t.Fatalf("tool schema missing from prompt: %q", prompt)
 	}
-	if len(prompt) == 0 {
-		t.Fatal("empty prompt")
+	if !strings.Contains(prompt, "[tool result for call_1] # Title") {
+		t.Fatalf("tool result missing from prompt: %q", prompt)
+	}
+}
+
+func TestParseToolCallsWithoutCodeFence(t *testing.T) {
+	calls, ok := parseToolCalls(`{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\"filePath\":\"README.md\"}"}}]}`)
+	if !ok || len(calls) != 1 {
+		t.Fatalf("expected one tool call, got ok=%v calls=%v", ok, calls)
+	}
+	if calls[0].Function.Arguments != `{"filePath":"README.md"}` {
+		t.Fatalf("unexpected arguments: %q", calls[0].Function.Arguments)
 	}
 }
