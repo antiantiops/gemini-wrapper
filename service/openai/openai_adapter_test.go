@@ -249,3 +249,154 @@ func TestCreateChatCompletionUsesResolvedModelFromStatus(t *testing.T) {
 		t.Fatalf("expected fallback model in response, got %q", resp.Model)
 	}
 }
+
+func TestParseToolCalls(t *testing.T) {
+	raw := "```json\n{\"tool_calls\": [{\"id\": \"call_123\", \"type\": \"function\", \"function\": {\"name\": \"read_file\", \"arguments\": \"{\\\"path\\\": \\\"README.md\\\"}\"}}]}\n```"
+	calls, ok := parseToolCalls(raw)
+	if !ok {
+		t.Fatalf("expected parseToolCalls to succeed")
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if calls[0].Function.Name != "read_file" {
+		t.Fatalf("expected read_file, got %s", calls[0].Function.Name)
+	}
+	if calls[0].ID != "call_123" {
+		t.Fatalf("expected call_123, got %s", calls[0].ID)
+	}
+}
+
+func TestBuildPromptFromRequestWithTools(t *testing.T) {
+	req := model.OpenAIChatCompletionRequest{
+		Tools: []model.OpenAITool{
+			{
+				Type: "function",
+				Function: model.OpenAIFunctionDefinition{
+					Name:        "read_file",
+					Description: "Read a file",
+				},
+			},
+		},
+		Messages: []model.OpenAIChatMessage{
+			{
+				Role:    "user",
+				Content: "Please read README.md",
+			},
+			{
+				Role: "assistant",
+				ToolCalls: []model.OpenAIToolCall{
+					{
+						ID:   "call_1",
+						Type: "function",
+						Function: model.OpenAIFunctionCall{
+							Name:      "read_file",
+							Arguments: "{\"path\":\"README.md\"}",
+						},
+					},
+				},
+			},
+			{
+				Role:       "tool",
+				ToolCallID: "call_1",
+				Content:    "# Title",
+			},
+		},
+	}
+
+	prompt := buildPromptFromRequest(req)
+	if !strings.Contains(prompt, `"name":"read_file"`) {
+		t.Fatalf("tool schema missing from prompt: %q", prompt)
+	}
+	if !strings.Contains(prompt, "[tool result for call_1] # Title") {
+		t.Fatalf("tool result missing from prompt: %q", prompt)
+	}
+}
+
+func TestParseToolCallsIgnoresPlaceholdersAndEmpty(t *testing.T) {
+	raw := "```json\n{\"tool_calls\": [{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"<tool_name>\", \"arguments\": \"{}\"}}]}\n```"
+	calls, ok := parseToolCalls(raw)
+	if ok || len(calls) != 0 {
+		t.Fatalf("expected placeholder <tool_name> to be ignored, got ok=%v, calls=%v", ok, calls)
+	}
+
+	rawEmpty := "```json\n{\"tool_calls\": [{\"id\": \"call_2\", \"type\": \"function\", \"function\": {\"name\": \"   \", \"arguments\": \"{}\"}}]}\n```"
+	callsEmpty, okEmpty := parseToolCalls(rawEmpty)
+	if okEmpty || len(callsEmpty) != 0 {
+		t.Fatalf("expected empty name to be ignored, got ok=%v, calls=%v", okEmpty, callsEmpty)
+	}
+}
+
+
+func TestParseToolChoice(t *testing.T) {
+	if cfg := parseToolChoice(nil); cfg.mode != "auto" {
+		t.Fatalf("expected auto, got %s", cfg.mode)
+	}
+	if cfg := parseToolChoice("none"); cfg.mode != "none" {
+		t.Fatalf("expected none, got %s", cfg.mode)
+	}
+	if cfg := parseToolChoice("required"); cfg.mode != "required" {
+		t.Fatalf("expected required, got %s", cfg.mode)
+	}
+	namedMap := map[string]interface{}{
+		"type": "function",
+		"function": map[string]interface{}{"name": "read_file"},
+	}
+	if cfg := parseToolChoice(namedMap); cfg.mode != "named" || cfg.funcName != "read_file" {
+		t.Fatalf("expected named read_file, got %s %s", cfg.mode, cfg.funcName)
+	}
+}
+
+func TestValidateToolCalls(t *testing.T) {
+	tools := []model.OpenAITool{
+		{
+			Type: "function",
+			Function: model.OpenAIFunctionDefinition{
+				Name: "read_file",
+				Parameters: map[string]interface{}{
+					"type": "object",
+					"required": []interface{}{"filePath"},
+				},
+			},
+		},
+	}
+
+	validCalls := []model.OpenAIToolCall{
+		{
+			Function: model.OpenAIFunctionCall{
+				Name:      "read_file",
+				Arguments: `{"filePath":"README.md"}`,
+			},
+		},
+	}
+
+	if err := validateToolCalls(validCalls, tools, toolChoiceConfig{mode: "auto"}); err != nil {
+		t.Fatalf("expected valid, got %v", err)
+	}
+
+	// Missing required param
+	invalidCalls := []model.OpenAIToolCall{
+		{
+			Function: model.OpenAIFunctionCall{
+				Name:      "read_file",
+				Arguments: `{"other":"README.md"}`,
+			},
+		},
+	}
+	if err := validateToolCalls(invalidCalls, tools, toolChoiceConfig{mode: "auto"}); err == nil {
+		t.Fatalf("expected error for missing required param")
+	}
+
+	// Unknown tool
+	unknownCalls := []model.OpenAIToolCall{
+		{
+			Function: model.OpenAIFunctionCall{
+				Name:      "write_file",
+				Arguments: `{}`,
+			},
+		},
+	}
+	if err := validateToolCalls(unknownCalls, tools, toolChoiceConfig{mode: "auto"}); err == nil {
+		t.Fatalf("expected error for unknown tool")
+	}
+}

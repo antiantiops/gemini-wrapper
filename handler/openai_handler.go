@@ -124,6 +124,33 @@ func (h *OpenAIHandler) streamChatCompletion(c *echo.Context, req model.OpenAICh
 		return nil
 	}
 
+	finishReason := "stop"
+	if len(resp.Choices) > 0 {
+		choice := resp.Choices[0]
+		finishReason = choice.FinishReason
+		// Tool-bearing requests are buffered by adapter. Emit one valid tool-call
+		// delta, never model JSON as assistant text.
+		if len(req.Tools) > 0 {
+			var delta model.OpenAIChatDelta
+			if finishReason == "tool_calls" {
+				delta.ToolCalls = choice.Message.ToolCalls
+			} else if content, ok := choice.Message.Content.(string); ok && content != "" {
+				delta.Content = content
+			}
+			if len(delta.ToolCalls) > 0 || delta.Content != "" {
+				toolChunk := model.OpenAIChatCompletionStreamChunk{
+					ID: completionID, Object: "chat.completion.chunk", Created: time.Now().Unix(), Model: resp.Model,
+					Choices: []model.OpenAIChatCompletionStreamChoice{{Index: 0, Delta: delta}},
+				}
+				toolBody, _ := json.Marshal(toolChunk)
+				if _, err := fmt.Fprintf(r, "data: %s\n\n", toolBody); err != nil {
+					return err
+				}
+				flusher.Flush()
+			}
+		}
+	}
+
 	// Final chunk with finish_reason and usage
 	finalChunk := model.OpenAIChatCompletionStreamChunk{
 		ID:      completionID,
@@ -134,7 +161,7 @@ func (h *OpenAIHandler) streamChatCompletion(c *echo.Context, req model.OpenAICh
 			{
 				Index:        0,
 				Delta:        model.OpenAIChatDelta{},
-				FinishReason: stringPtr("stop"),
+				FinishReason: stringPtr(finishReason),
 			},
 		},
 		Usage: &resp.Usage,
@@ -273,7 +300,6 @@ func (h *OpenAIHandler) streamResponse(c *echo.Context, req model.OpenAIResponse
 	flusher.Flush()
 	return err
 }
-
 
 func writeOpenAIError(c *echo.Context, err error) error {
 	if apiErr, ok := err.(*openai.APIError); ok {

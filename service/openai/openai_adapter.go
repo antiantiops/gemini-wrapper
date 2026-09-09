@@ -2,8 +2,10 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -57,7 +59,7 @@ func (a *AntigravityAdapter) CreateChatCompletion(req model.OpenAIChatCompletion
 		modelName = "antigravity-default"
 	}
 
-	prompt := buildPromptFromMessages(req.Messages)
+	prompt := buildPromptFromRequest(req)
 	answer, status, err := a.geminiService.Ask(prompt, modelName)
 	if err != nil {
 		return model.OpenAIChatCompletionResponse{}, convertAntigravityError(err, status)
@@ -69,7 +71,46 @@ func (a *AntigravityAdapter) CreateChatCompletion(req model.OpenAIChatCompletion
 
 	now := time.Now().Unix()
 	promptTokens := estimateTokens(prompt)
+
+	tc := parseToolChoice(req.ToolChoice)
+	var toolCalls []model.OpenAIToolCall
+	var ok bool
+	if len(req.Tools) > 0 && tc.mode != "none" {
+		toolCalls, ok = parseToolCalls(answer)
+		valErr := validateToolCalls(toolCalls, req.Tools, tc)
+		if valErr != nil && (tc.mode == "required" || tc.mode == "named") {
+			// 1 corrective retry
+			retryPrompt := prompt + fmt.Sprintf("\n\n[SYSTEM ERROR]: Previous response violated tool requirements (%v). You MUST output ONLY a valid ```json ``` block with tool_calls.", valErr)
+			retryAns, retryStat, retryErr := a.geminiService.Ask(retryPrompt, modelName)
+			if retryErr == nil && strings.TrimSpace(retryAns) != "" {
+				answer = retryAns
+				if retryStat != nil && strings.TrimSpace(retryStat.Model) != "" {
+					resolvedModel = retryStat.Model
+				}
+				toolCalls, ok = parseToolCalls(answer)
+			}
+		}
+	} else if len(req.Tools) > 0 && tc.mode == "none" {
+		ok = false
+		toolCalls = nil
+	} else {
+		toolCalls, ok = parseToolCalls(answer)
+	}
+
 	completionTokens := estimateTokens(answer)
+
+	message := model.OpenAIChatMessage{
+		Role:    "assistant",
+		Content: answer,
+	}
+	finishReason := "stop"
+	if ok && len(toolCalls) > 0 {
+		if valErr := validateToolCalls(toolCalls, req.Tools, tc); valErr == nil {
+			message.Content = nil
+			message.ToolCalls = toolCalls
+			finishReason = "tool_calls"
+		}
+	}
 
 	return model.OpenAIChatCompletionResponse{
 		ID:      fmt.Sprintf("chatcmpl-%d", now),
@@ -78,12 +119,9 @@ func (a *AntigravityAdapter) CreateChatCompletion(req model.OpenAIChatCompletion
 		Model:   resolvedModel,
 		Choices: []model.OpenAIChatCompletionChoice{
 			{
-				Index: 0,
-				Message: model.OpenAIChatMessage{
-					Role:    "assistant",
-					Content: answer,
-				},
-				FinishReason: "stop",
+				Index:        0,
+				Message:      message,
+				FinishReason: finishReason,
 			},
 		},
 		Usage: model.OpenAIUsage{
@@ -232,14 +270,21 @@ func (a *AntigravityAdapter) StreamChatCompletion(ctx context.Context, req model
 	if modelName == "" {
 		modelName = "antigravity-default"
 	}
-	prompt := buildPromptFromMessages(req.Messages)
+	prompt := buildPromptFromRequest(req)
 	var answer strings.Builder
+	// Tool-call JSON cannot be sent as content deltas: VS Code renders it as text
+	// and never dispatches its client-side tool. Buffer every tools request, then
+	// classify final output before emitting a protocol-compliant SSE chunk.
+	streamText := len(req.Tools) == 0
 	status, err := streaming.Stream(ctx, prompt, modelName, func(event gemini_impl.StreamEvent) error {
 		if event.Delta == "" {
 			return nil
 		}
 		answer.WriteString(event.Delta)
-		return emit(event.Delta)
+		if streamText {
+			return emit(event.Delta)
+		}
+		return nil
 	})
 	if err != nil {
 		return model.OpenAIChatCompletionResponse{}, convertAntigravityError(err, status)
@@ -250,7 +295,50 @@ func (a *AntigravityAdapter) StreamChatCompletion(ctx context.Context, req model
 	}
 	now := time.Now().Unix()
 	promptTokens := estimateTokens(prompt)
-	completionTokens := estimateTokens(answer.String())
+	tc := parseToolChoice(req.ToolChoice)
+	var toolCalls []model.OpenAIToolCall
+	ansStr := answer.String()
+	if len(req.Tools) > 0 && tc.mode != "none" {
+		var toolOk bool
+		toolCalls, toolOk = parseToolCalls(ansStr)
+		ok = toolOk
+		valErr := validateToolCalls(toolCalls, req.Tools, tc)
+		if valErr != nil && (tc.mode == "required" || tc.mode == "named") {
+			// 1 corrective retry
+			retryPrompt := prompt + fmt.Sprintf("\n\n[SYSTEM ERROR]: Previous response violated tool requirements (%v). You MUST output ONLY a valid ```json ``` block with tool_calls.", valErr)
+			var retryAns strings.Builder
+			retryStat, retryErr := streaming.Stream(ctx, retryPrompt, modelName, func(event gemini_impl.StreamEvent) error {
+				if event.Delta != "" {
+					retryAns.WriteString(event.Delta)
+				}
+				return nil
+			})
+			if retryErr == nil && strings.TrimSpace(retryAns.String()) != "" {
+				ansStr = retryAns.String()
+				if retryStat != nil && strings.TrimSpace(retryStat.Model) != "" {
+					resolvedModel = retryStat.Model
+				}
+				toolCalls, ok = parseToolCalls(ansStr)
+			}
+		}
+	} else if len(req.Tools) > 0 && tc.mode == "none" {
+		ok = false
+		toolCalls = nil
+	} else {
+		toolCalls, ok = parseToolCalls(ansStr)
+	}
+
+	completionTokens := estimateTokens(ansStr)
+
+	message := model.OpenAIChatMessage{Role: "assistant", Content: ansStr}
+	finishReason := "stop"
+	if ok && len(toolCalls) > 0 {
+		if valErr := validateToolCalls(toolCalls, req.Tools, tc); valErr == nil {
+			message.Content = nil
+			message.ToolCalls = toolCalls
+			finishReason = "tool_calls"
+		}
+	}
 	return model.OpenAIChatCompletionResponse{
 		ID:      fmt.Sprintf("chatcmpl-%d", now),
 		Object:  "chat.completion",
@@ -259,8 +347,8 @@ func (a *AntigravityAdapter) StreamChatCompletion(ctx context.Context, req model
 		Choices: []model.OpenAIChatCompletionChoice{
 			{
 				Index:        0,
-				Message:      model.OpenAIChatMessage{Role: "assistant", Content: answer.String()},
-				FinishReason: "stop",
+				Message:      message,
+				FinishReason: finishReason,
 			},
 		},
 		Usage: model.OpenAIUsage{
@@ -310,17 +398,291 @@ func (a *AntigravityAdapter) StreamResponse(ctx context.Context, req model.OpenA
 	return model.OpenAIResponse{ID: fmt.Sprintf("resp-%d", time.Now().UnixNano()), Object: "response", CreatedAt: now, Status: "completed", Model: modelName, Output: []model.OpenAIResponseOutput{{Type: "message", Role: "assistant", Content: []model.OpenAIResponseContent{{Type: "output_text", Text: answer.String()}}}}, OutputText: answer.String(), Usage: model.OpenAIUsage{PromptTokens: estimateTokens(prompt), CompletionTokens: estimateTokens(answer.String()), TotalTokens: estimateTokens(prompt) + estimateTokens(answer.String())}}, nil
 }
 
-func buildPromptFromMessages(messages []model.OpenAIChatMessage) string {
-	parts := make([]string, 0, len(messages))
-	for _, m := range messages {
+
+type toolChoiceConfig struct {
+	mode     string // "none", "auto", "required", "named"
+	funcName string
+}
+
+func parseToolChoice(tc interface{}) toolChoiceConfig {
+	if tc == nil {
+		return toolChoiceConfig{mode: "auto"}
+	}
+	switch v := tc.(type) {
+	case string:
+		s := strings.ToLower(strings.TrimSpace(v))
+		switch s {
+		case "none":
+			return toolChoiceConfig{mode: "none"}
+		case "required":
+			return toolChoiceConfig{mode: "required"}
+		default:
+			return toolChoiceConfig{mode: "auto"}
+		}
+	case map[string]interface{}:
+		if typ, ok := v["type"].(string); ok && strings.EqualFold(typ, "function") {
+			if fn, ok := v["function"].(map[string]interface{}); ok {
+				if name, ok := fn["name"].(string); ok && strings.TrimSpace(name) != "" {
+					return toolChoiceConfig{mode: "named", funcName: strings.TrimSpace(name)}
+				}
+			}
+		}
+	}
+	return toolChoiceConfig{mode: "auto"}
+}
+
+func validateToolCalls(calls []model.OpenAIToolCall, tools []model.OpenAITool, tc toolChoiceConfig) error {
+	if tc.mode == "none" {
+		if len(calls) > 0 {
+			return fmt.Errorf("tool_choice is none but tool calls were returned")
+		}
+		return nil
+	}
+	if len(calls) == 0 {
+		if tc.mode == "required" || tc.mode == "named" {
+			return fmt.Errorf("tool call is required by tool_choice")
+		}
+		return nil
+	}
+
+	toolMap := make(map[string]model.OpenAITool, len(tools))
+	for _, t := range tools {
+		toolMap[t.Function.Name] = t
+	}
+
+	for _, call := range calls {
+		if call.Function.Name == "" {
+			return fmt.Errorf("tool call missing function name")
+		}
+		tDef, exists := toolMap[call.Function.Name]
+		if !exists {
+			return fmt.Errorf("unknown tool %q called", call.Function.Name)
+		}
+		if tc.mode == "named" && call.Function.Name != tc.funcName {
+			return fmt.Errorf("expected tool %q, got %q", tc.funcName, call.Function.Name)
+		}
+
+		var argsObj map[string]interface{}
+		argsBytes := []byte(call.Function.Arguments)
+		if len(argsBytes) == 0 {
+			argsBytes = []byte("{}")
+		}
+		if err := json.Unmarshal(argsBytes, &argsObj); err != nil {
+			return fmt.Errorf("invalid json arguments for tool %q: %v", call.Function.Name, err)
+		}
+
+		// Check required fields if available in parameters
+		if tDef.Function.Parameters != nil {
+			if paramMap, ok := tDef.Function.Parameters.(map[string]interface{}); ok {
+				if reqList, ok := paramMap["required"].([]interface{}); ok {
+					for _, reqField := range reqList {
+						if fieldName, ok := reqField.(string); ok {
+							if _, present := argsObj[fieldName]; !present {
+								return fmt.Errorf("missing required parameter %q for tool %q", fieldName, call.Function.Name)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func buildPromptFromRequest(req model.OpenAIChatCompletionRequest) string {
+	parts := make([]string, 0, len(req.Messages)+1)
+	tc := parseToolChoice(req.ToolChoice)
+	if len(req.Tools) > 0 && tc.mode != "none" {
+		toolsBytes, _ := json.Marshal(req.Tools)
+		extraRule := "4. If no tool is needed, respond normally with plain text."
+		if tc.mode == "required" {
+			extraRule = "4. MANDATORY: You MUST call at least one available tool. Do not respond with plain text."
+		} else if tc.mode == "named" {
+			extraRule = fmt.Sprintf("4. MANDATORY: You MUST call the specific tool %q. Do not call other tools or respond with plain text.", tc.funcName)
+		}
+
+		sys := "SYSTEM INSTRUCTION FOR TOOL CALLING:\n" +
+			"You are an AI assistant with access to client tools:\n" +
+			string(toolsBytes) + "\n\n" +
+			"CRITICAL RULES:\n" +
+			"1. You MUST NOT attempt to execute tools or commands on your host system directly.\n" +
+			"2. If you need to use a tool, respond ONLY with a JSON code block in this format:\n" +
+			"```json\n" +
+			"{\n" +
+			"  \"tool_calls\": [\n" +
+			"    {\n" +
+			"      \"id\": \"call_1\",\n" +
+			"      \"type\": \"function\",\n" +
+			"      \"function\": {\n" +
+			"        \"name\": \"<tool_name>\",\n" +
+			"        \"arguments\": \"{\\\"param\\\": \\\"value\\\"}\"\n" +
+			"      }\n" +
+			"    }\n" +
+			"  ]\n" +
+			"}\n" +
+			"```\n" +
+			"3. Do NOT output conversational text or explanations around the JSON block when calling tools.\n" +
+			extraRule
+		parts = append(parts, sys)
+	}
+	for _, m := range req.Messages {
 		role := strings.TrimSpace(m.Role)
 		if role == "" {
 			role = "user"
 		}
 		content := flattenMessageContent(m.Content)
+		if len(m.ToolCalls) > 0 {
+			callsBytes, _ := json.Marshal(m.ToolCalls)
+			content = fmt.Sprintf("[assistant tool calls] %s", string(callsBytes))
+		}
+		if m.ToolCallID != "" {
+			content = fmt.Sprintf("[tool result for %s] %s", m.ToolCallID, content)
+		}
 		parts = append(parts, fmt.Sprintf("%s: %s", role, content))
 	}
-	return strings.Join(parts, "\n")
+	return strings.Join(parts, "\n\n")
+}
+
+func buildPromptFromMessages(messages []model.OpenAIChatMessage) string {
+	return buildPromptFromRequest(model.OpenAIChatCompletionRequest{Messages: messages})
+}
+
+var toolCallRegex = regexp.MustCompile("(?s)^```(?:json)?\\s*(.*?)\\s*```$")
+
+func parseToolCalls(rawText string) ([]model.OpenAIToolCall, bool) {
+	target := strings.TrimSpace(rawText)
+	if matches := toolCallRegex.FindStringSubmatch(target); len(matches) == 2 {
+		target = strings.TrimSpace(matches[1])
+	}
+
+	var envelope struct {
+		ToolCalls []struct {
+			ID       string `json:"id"`
+			Type     string `json:"type"`
+			Name     string `json:"name"`
+			Function *struct {
+				Name      string      `json:"name"`
+				Arguments interface{} `json:"arguments"`
+			} `json:"function"`
+			Arguments interface{} `json:"arguments"`
+		} `json:"tool_calls"`
+	}
+
+	if err := json.Unmarshal([]byte(target), &envelope); err == nil && len(envelope.ToolCalls) > 0 {
+		var result []model.OpenAIToolCall
+		for _, tc := range envelope.ToolCalls {
+			name := strings.TrimSpace(tc.Name)
+			if tc.Function != nil && strings.TrimSpace(tc.Function.Name) != "" {
+				name = strings.TrimSpace(tc.Function.Name)
+			}
+			if name == "" || name == "<tool_name>" {
+				continue
+			}
+			var argsStr string
+			if tc.Function != nil {
+				switch a := tc.Function.Arguments.(type) {
+				case string:
+					argsStr = a
+				default:
+					b, _ := json.Marshal(a)
+					argsStr = string(b)
+				}
+			} else if tc.Arguments != nil {
+				switch a := tc.Arguments.(type) {
+				case string:
+					argsStr = a
+				default:
+					b, _ := json.Marshal(a)
+					argsStr = string(b)
+				}
+			}
+			id := tc.ID
+			if id == "" {
+				id = fmt.Sprintf("call_%d", len(result)+1)
+			}
+			typ := tc.Type
+			if typ == "" {
+				typ = "function"
+			}
+			idx := len(result)
+			result = append(result, model.OpenAIToolCall{
+				Index: &idx,
+				ID:    id,
+				Type:  typ,
+				Function: model.OpenAIFunctionCall{
+					Name:      name,
+					Arguments: argsStr,
+				},
+			})
+		}
+		if len(result) > 0 {
+			return result, true
+		}
+	}
+
+	var directList []struct {
+		ID       string `json:"id"`
+		Type     string `json:"type"`
+		Name     string `json:"name"`
+		Function *struct {
+			Name      string      `json:"name"`
+			Arguments interface{} `json:"arguments"`
+		} `json:"function"`
+		Arguments interface{} `json:"arguments"`
+	}
+	if err := json.Unmarshal([]byte(target), &directList); err == nil && len(directList) > 0 {
+		var result []model.OpenAIToolCall
+		for _, tc := range directList {
+			name := strings.TrimSpace(tc.Name)
+			if tc.Function != nil && strings.TrimSpace(tc.Function.Name) != "" {
+				name = strings.TrimSpace(tc.Function.Name)
+			}
+			if name == "" || name == "<tool_name>" {
+				continue
+			}
+			var argsStr string
+			if tc.Function != nil {
+				switch a := tc.Function.Arguments.(type) {
+				case string:
+					argsStr = a
+				default:
+					b, _ := json.Marshal(a)
+					argsStr = string(b)
+				}
+			} else if tc.Arguments != nil {
+				switch a := tc.Arguments.(type) {
+				case string:
+					argsStr = a
+				default:
+					b, _ := json.Marshal(a)
+					argsStr = string(b)
+				}
+			}
+			id := tc.ID
+			if id == "" {
+				id = fmt.Sprintf("call_%d", len(result)+1)
+			}
+			typ := tc.Type
+			if typ == "" {
+				typ = "function"
+			}
+			idx := len(result)
+			result = append(result, model.OpenAIToolCall{
+				Index: &idx,
+				ID:    id,
+				Type:  typ,
+				Function: model.OpenAIFunctionCall{
+					Name:      name,
+					Arguments: argsStr,
+				},
+			})
+		}
+		if len(result) > 0 {
+			return result, true
+		}
+	}
+
+	return nil, false
 }
 
 // flattenMessageContent accepts the OpenAI chat `content` field, which may be a
