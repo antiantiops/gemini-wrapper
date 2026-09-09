@@ -297,10 +297,11 @@ func (a *AntigravityAdapter) StreamChatCompletion(ctx context.Context, req model
 	completionTokens := estimateTokens(answer.String())
 	tc := parseToolChoice(req.ToolChoice)
 	var toolCalls []model.OpenAIToolCall
-	var ok bool
 	ansStr := answer.String()
 	if len(req.Tools) > 0 && tc.mode != "none" {
-		toolCalls, ok = parseToolCalls(ansStr)
+		var toolOk bool
+		toolCalls, toolOk = parseToolCalls(ansStr)
+		ok = toolOk
 		valErr := validateToolCalls(toolCalls, req.Tools, tc)
 		if valErr != nil && (tc.mode == "required" || tc.mode == "named") {
 			// 1 corrective retry
