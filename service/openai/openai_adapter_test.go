@@ -322,3 +322,76 @@ func TestParseToolCallsWithoutCodeFence(t *testing.T) {
 		t.Fatalf("unexpected arguments: %q", calls[0].Function.Arguments)
 	}
 }
+
+func TestParseToolChoice(t *testing.T) {
+	if cfg := parseToolChoice(nil); cfg.mode != "auto" {
+		t.Fatalf("expected auto, got %s", cfg.mode)
+	}
+	if cfg := parseToolChoice("none"); cfg.mode != "none" {
+		t.Fatalf("expected none, got %s", cfg.mode)
+	}
+	if cfg := parseToolChoice("required"); cfg.mode != "required" {
+		t.Fatalf("expected required, got %s", cfg.mode)
+	}
+	namedMap := map[string]interface{}{
+		"type": "function",
+		"function": map[string]interface{}{"name": "read_file"},
+	}
+	if cfg := parseToolChoice(namedMap); cfg.mode != "named" || cfg.funcName != "read_file" {
+		t.Fatalf("expected named read_file, got %s %s", cfg.mode, cfg.funcName)
+	}
+}
+
+func TestValidateToolCalls(t *testing.T) {
+	tools := []model.OpenAITool{
+		{
+			Type: "function",
+			Function: model.OpenAIFunctionDefinition{
+				Name: "read_file",
+				Parameters: map[string]interface{}{
+					"type": "object",
+					"required": []interface{}{"filePath"},
+				},
+			},
+		},
+	}
+
+	validCalls := []model.OpenAIToolCall{
+		{
+			Function: model.OpenAIFunctionCall{
+				Name:      "read_file",
+				Arguments: `{"filePath":"README.md"}`,
+			},
+		},
+	}
+
+	if err := validateToolCalls(validCalls, tools, toolChoiceConfig{mode: "auto"}); err != nil {
+		t.Fatalf("expected valid, got %v", err)
+	}
+
+	// Missing required param
+	invalidCalls := []model.OpenAIToolCall{
+		{
+			Function: model.OpenAIFunctionCall{
+				Name:      "read_file",
+				Arguments: `{"other":"README.md"}`,
+			},
+		},
+	}
+	if err := validateToolCalls(invalidCalls, tools, toolChoiceConfig{mode: "auto"}); err == nil {
+		t.Fatalf("expected error for missing required param")
+	}
+
+	// Unknown tool
+	unknownCalls := []model.OpenAIToolCall{
+		{
+			Function: model.OpenAIFunctionCall{
+				Name:      "write_file",
+				Arguments: `{}`,
+			},
+		},
+	}
+	if err := validateToolCalls(unknownCalls, tools, toolChoiceConfig{mode: "auto"}); err == nil {
+		t.Fatalf("expected error for unknown tool")
+	}
+}

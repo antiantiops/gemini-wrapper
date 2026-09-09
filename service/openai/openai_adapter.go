@@ -73,15 +73,42 @@ func (a *AntigravityAdapter) CreateChatCompletion(req model.OpenAIChatCompletion
 	promptTokens := estimateTokens(prompt)
 	completionTokens := estimateTokens(answer)
 
+	tc := parseToolChoice(req.ToolChoice)
+	var toolCalls []model.OpenAIToolCall
+	var ok bool
+	if len(req.Tools) > 0 && tc.mode != "none" {
+		toolCalls, ok = parseToolCalls(answer)
+		valErr := validateToolCalls(toolCalls, req.Tools, tc)
+		if valErr != nil && (tc.mode == "required" || tc.mode == "named") {
+			// 1 corrective retry
+			retryPrompt := prompt + fmt.Sprintf("\n\n[SYSTEM ERROR]: Previous response violated tool requirements (%v). You MUST output ONLY a valid ```json ``` block with tool_calls.", valErr)
+			retryAns, retryStat, retryErr := a.geminiService.Ask(retryPrompt, modelName)
+			if retryErr == nil && strings.TrimSpace(retryAns) != "" {
+				answer = retryAns
+				if retryStat != nil && strings.TrimSpace(retryStat.Model) != "" {
+					resolvedModel = retryStat.Model
+				}
+				toolCalls, ok = parseToolCalls(answer)
+			}
+		}
+	} else if len(req.Tools) > 0 && tc.mode == "none" {
+		ok = false
+		toolCalls = nil
+	} else {
+		toolCalls, ok = parseToolCalls(answer)
+	}
+
 	message := model.OpenAIChatMessage{
 		Role:    "assistant",
 		Content: answer,
 	}
 	finishReason := "stop"
-	if toolCalls, ok := parseToolCalls(answer); ok {
-		message.Content = nil
-		message.ToolCalls = toolCalls
-		finishReason = "tool_calls"
+	if ok && len(toolCalls) > 0 {
+		if valErr := validateToolCalls(toolCalls, req.Tools, tc); valErr == nil {
+			message.Content = nil
+			message.ToolCalls = toolCalls
+			finishReason = "tool_calls"
+		}
 	}
 
 	return model.OpenAIChatCompletionResponse{
@@ -268,12 +295,46 @@ func (a *AntigravityAdapter) StreamChatCompletion(ctx context.Context, req model
 	now := time.Now().Unix()
 	promptTokens := estimateTokens(prompt)
 	completionTokens := estimateTokens(answer.String())
-	message := model.OpenAIChatMessage{Role: "assistant", Content: answer.String()}
+	tc := parseToolChoice(req.ToolChoice)
+	var toolCalls []model.OpenAIToolCall
+	var ok bool
+	ansStr := answer.String()
+	if len(req.Tools) > 0 && tc.mode != "none" {
+		toolCalls, ok = parseToolCalls(ansStr)
+		valErr := validateToolCalls(toolCalls, req.Tools, tc)
+		if valErr != nil && (tc.mode == "required" || tc.mode == "named") {
+			// 1 corrective retry
+			retryPrompt := prompt + fmt.Sprintf("\n\n[SYSTEM ERROR]: Previous response violated tool requirements (%v). You MUST output ONLY a valid ```json ``` block with tool_calls.", valErr)
+			var retryAns strings.Builder
+			retryStat, retryErr := streaming.Stream(ctx, retryPrompt, modelName, func(event gemini_impl.StreamEvent) error {
+				if event.Delta != "" {
+					retryAns.WriteString(event.Delta)
+				}
+				return nil
+			})
+			if retryErr == nil && strings.TrimSpace(retryAns.String()) != "" {
+				ansStr = retryAns.String()
+				if retryStat != nil && strings.TrimSpace(retryStat.Model) != "" {
+					resolvedModel = retryStat.Model
+				}
+				toolCalls, ok = parseToolCalls(ansStr)
+			}
+		}
+	} else if len(req.Tools) > 0 && tc.mode == "none" {
+		ok = false
+		toolCalls = nil
+	} else {
+		toolCalls, ok = parseToolCalls(ansStr)
+	}
+
+	message := model.OpenAIChatMessage{Role: "assistant", Content: ansStr}
 	finishReason := "stop"
-	if toolCalls, ok := parseToolCalls(answer.String()); ok {
-		message.Content = nil
-		message.ToolCalls = toolCalls
-		finishReason = "tool_calls"
+	if ok && len(toolCalls) > 0 {
+		if valErr := validateToolCalls(toolCalls, req.Tools, tc); valErr == nil {
+			message.Content = nil
+			message.ToolCalls = toolCalls
+			finishReason = "tool_calls"
+		}
 	}
 	return model.OpenAIChatCompletionResponse{
 		ID:      fmt.Sprintf("chatcmpl-%d", now),
@@ -334,10 +395,109 @@ func (a *AntigravityAdapter) StreamResponse(ctx context.Context, req model.OpenA
 	return model.OpenAIResponse{ID: fmt.Sprintf("resp-%d", time.Now().UnixNano()), Object: "response", CreatedAt: now, Status: "completed", Model: modelName, Output: []model.OpenAIResponseOutput{{Type: "message", Role: "assistant", Content: []model.OpenAIResponseContent{{Type: "output_text", Text: answer.String()}}}}, OutputText: answer.String(), Usage: model.OpenAIUsage{PromptTokens: estimateTokens(prompt), CompletionTokens: estimateTokens(answer.String()), TotalTokens: estimateTokens(prompt) + estimateTokens(answer.String())}}, nil
 }
 
+
+type toolChoiceConfig struct {
+	mode     string // "none", "auto", "required", "named"
+	funcName string
+}
+
+func parseToolChoice(tc interface{}) toolChoiceConfig {
+	if tc == nil {
+		return toolChoiceConfig{mode: "auto"}
+	}
+	switch v := tc.(type) {
+	case string:
+		s := strings.ToLower(strings.TrimSpace(v))
+		switch s {
+		case "none":
+			return toolChoiceConfig{mode: "none"}
+		case "required":
+			return toolChoiceConfig{mode: "required"}
+		default:
+			return toolChoiceConfig{mode: "auto"}
+		}
+	case map[string]interface{}:
+		if typ, ok := v["type"].(string); ok && strings.EqualFold(typ, "function") {
+			if fn, ok := v["function"].(map[string]interface{}); ok {
+				if name, ok := fn["name"].(string); ok && strings.TrimSpace(name) != "" {
+					return toolChoiceConfig{mode: "named", funcName: strings.TrimSpace(name)}
+				}
+			}
+		}
+	}
+	return toolChoiceConfig{mode: "auto"}
+}
+
+func validateToolCalls(calls []model.OpenAIToolCall, tools []model.OpenAITool, tc toolChoiceConfig) error {
+	if tc.mode == "none" {
+		if len(calls) > 0 {
+			return fmt.Errorf("tool_choice is none but tool calls were returned")
+		}
+		return nil
+	}
+	if len(calls) == 0 {
+		if tc.mode == "required" || tc.mode == "named" {
+			return fmt.Errorf("tool call is required by tool_choice")
+		}
+		return nil
+	}
+
+	toolMap := make(map[string]model.OpenAITool, len(tools))
+	for _, t := range tools {
+		toolMap[t.Function.Name] = t
+	}
+
+	for _, call := range calls {
+		if call.Function.Name == "" {
+			return fmt.Errorf("tool call missing function name")
+		}
+		tDef, exists := toolMap[call.Function.Name]
+		if !exists {
+			return fmt.Errorf("unknown tool %q called", call.Function.Name)
+		}
+		if tc.mode == "named" && call.Function.Name != tc.funcName {
+			return fmt.Errorf("expected tool %q, got %q", tc.funcName, call.Function.Name)
+		}
+
+		var argsObj map[string]interface{}
+		argsBytes := []byte(call.Function.Arguments)
+		if len(argsBytes) == 0 {
+			argsBytes = []byte("{}")
+		}
+		if err := json.Unmarshal(argsBytes, &argsObj); err != nil {
+			return fmt.Errorf("invalid json arguments for tool %q: %v", call.Function.Name, err)
+		}
+
+		// Check required fields if available in parameters
+		if tDef.Function.Parameters != nil {
+			if paramMap, ok := tDef.Function.Parameters.(map[string]interface{}); ok {
+				if reqList, ok := paramMap["required"].([]interface{}); ok {
+					for _, reqField := range reqList {
+						if fieldName, ok := reqField.(string); ok {
+							if _, present := argsObj[fieldName]; !present {
+								return fmt.Errorf("missing required parameter %q for tool %q", fieldName, call.Function.Name)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func buildPromptFromRequest(req model.OpenAIChatCompletionRequest) string {
 	parts := make([]string, 0, len(req.Messages)+1)
-	if len(req.Tools) > 0 {
+	tc := parseToolChoice(req.ToolChoice)
+	if len(req.Tools) > 0 && tc.mode != "none" {
 		toolsBytes, _ := json.Marshal(req.Tools)
+		extraRule := "4. If no tool is needed, respond normally with plain text."
+		if tc.mode == "required" {
+			extraRule = "4. MANDATORY: You MUST call at least one available tool. Do not respond with plain text."
+		} else if tc.mode == "named" {
+			extraRule = fmt.Sprintf("4. MANDATORY: You MUST call the specific tool %q. Do not call other tools or respond with plain text.", tc.funcName)
+		}
+
 		sys := "SYSTEM INSTRUCTION FOR TOOL CALLING:\n" +
 			"You are an AI assistant with access to client tools:\n" +
 			string(toolsBytes) + "\n\n" +
@@ -359,7 +519,7 @@ func buildPromptFromRequest(req model.OpenAIChatCompletionRequest) string {
 			"}\n" +
 			"```\n" +
 			"3. Do NOT output conversational text or explanations around the JSON block when calling tools.\n" +
-			"4. If no tool is needed, respond normally with plain text."
+			extraRule
 		parts = append(parts, sys)
 	}
 	for _, m := range req.Messages {
